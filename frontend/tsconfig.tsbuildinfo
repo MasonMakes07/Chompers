@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/api/client.ts","./src/components/guestrow.tsx","./src/components/locationpicker.tsx","./src/components/matchbadge.tsx","./src/components/partyform.tsx","./src/components/resultcard.tsx"],"version":"5.9.3"}
