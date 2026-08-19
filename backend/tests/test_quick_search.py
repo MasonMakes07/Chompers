@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from backend import translator
 from backend.schemas import SearchRequest
-from backend.services.places_client import PlacesClient
+from backend.services.places_client import OverpassPlacesClient
 
 BASE_LAT, BASE_LNG = 32.8801, -117.2340
 
@@ -86,18 +86,31 @@ def test_query_alone_is_not_enough():
 
 # Different queries at one location must not collide in the cache.
 def test_cache_key_separates_queries():
-    nearby_key = PlacesClient._cache_key(BASE_LAT, BASE_LNG, 5000)
-    sushi_key = PlacesClient._cache_key(BASE_LAT, BASE_LNG, 5000, "sushi")
-    tacos_key = PlacesClient._cache_key(BASE_LAT, BASE_LNG, 5000, "tacos")
+    client = OverpassPlacesClient()
+    nearby_key = client._cache_key(BASE_LAT, BASE_LNG, 5000)
+    sushi_key = client._cache_key(BASE_LAT, BASE_LNG, 5000, "sushi")
+    tacos_key = client._cache_key(BASE_LAT, BASE_LNG, 5000, "tacos")
 
     assert len({nearby_key, sushi_key, tacos_key}) == 3
 
 
 # Queries differing only by case or padding must share one cache entry.
 def test_cache_key_normalizes_query():
-    assert PlacesClient._cache_key(
+    client = OverpassPlacesClient()
+
+    assert client._cache_key(
         BASE_LAT, BASE_LNG, 5000, "  SUSHI "
-    ) == PlacesClient._cache_key(BASE_LAT, BASE_LNG, 5000, "sushi")
+    ) == client._cache_key(BASE_LAT, BASE_LNG, 5000, "sushi")
+
+
+# Two providers must never share a cache entry for the same coordinates.
+def test_cache_key_separates_providers():
+    from backend.services.places_client import GooglePlacesClient
+
+    overpass_key = OverpassPlacesClient()._cache_key(BASE_LAT, BASE_LNG, 5000)
+    google_key = GooglePlacesClient()._cache_key(BASE_LAT, BASE_LNG, 5000)
+
+    assert overpass_key != google_key
 
 
 # ---------------------------------------------------------------------------

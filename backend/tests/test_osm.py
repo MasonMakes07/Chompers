@@ -10,7 +10,7 @@ from backend.models.party import Party
 from backend.models.restaurant import Restaurant
 from backend.services import osm_tags
 from backend.services.geocoder import Geocoder
-from backend.services.places_client import PlacesClient
+from backend.services.places_client import OverpassPlacesClient
 
 BASE_LAT, BASE_LNG = 32.8801, -117.2340
 
@@ -184,7 +184,7 @@ def test_negative_diet_tag_disqualifies():
     ],
 )
 def test_escaped_term_contains_no_overpass_syntax(hostile):
-    term = PlacesClient._escape_term(hostile)
+    term = OverpassPlacesClient._escape_term(hostile)
 
     for dangerous in ('"', "\\", "[", "]", "(", ")", ";", "/", " "):
         assert dangerous not in term
@@ -192,18 +192,18 @@ def test_escaped_term_contains_no_overpass_syntax(hostile):
 
 # Ordinary cuisine values must survive escaping untouched.
 def test_escaped_term_keeps_valid_cuisine_values():
-    assert PlacesClient._escape_term("steak_house") == "steak_house"
-    assert PlacesClient._escape_term("ice_cream") == "ice_cream"
+    assert OverpassPlacesClient._escape_term("steak_house") == "steak_house"
+    assert OverpassPlacesClient._escape_term("ice_cream") == "ice_cream"
 
 
 # A term of pure punctuation must escape to nothing, not to broken syntax.
 def test_escaped_punctuation_only_term_is_empty():
-    assert PlacesClient._escape_term("!!!???") == ""
+    assert OverpassPlacesClient._escape_term("!!!???") == ""
 
 
 # The generated nearby query must be valid Overpass QL with bounded output.
 def test_nearby_query_is_bounded():
-    query = PlacesClient._nearby_query(BASE_LAT, BASE_LNG, 5000)
+    query = OverpassPlacesClient._nearby_query(BASE_LAT, BASE_LNG, 5000)
 
     assert query.startswith("[out:json]")
     assert f"around:5000,{BASE_LAT},{BASE_LNG}" in query
@@ -287,7 +287,7 @@ def test_reverse_label_never_returns_empty():
 
 # Duplicate concurrent searches must collapse into a single upstream call.
 def test_identical_concurrent_queries_hit_upstream_once(monkeypatch):
-    client = PlacesClient()
+    client = OverpassPlacesClient()
     upstream_calls: list[str] = []
 
     async def fake_post(overpass_query: str):
@@ -314,7 +314,7 @@ def test_identical_concurrent_queries_hit_upstream_once(monkeypatch):
 
 # Different searches must still each reach upstream on their own.
 def test_different_queries_are_not_deduplicated(monkeypatch):
-    client = PlacesClient()
+    client = OverpassPlacesClient()
     upstream_calls: list[str] = []
 
     async def fake_post(overpass_query: str):
@@ -337,7 +337,7 @@ def test_different_queries_are_not_deduplicated(monkeypatch):
 
 # A finished query must be removed from the in-flight map, not leak.
 def test_inflight_entry_is_released(monkeypatch):
-    client = PlacesClient()
+    client = OverpassPlacesClient()
 
     async def fake_post(overpass_query: str):
         return {"elements": []}
@@ -352,7 +352,7 @@ def test_inflight_entry_is_released(monkeypatch):
 def test_inflight_entry_is_released_after_failure(monkeypatch):
     from backend.services.places_client import PlacesError
 
-    client = PlacesClient()
+    client = OverpassPlacesClient()
 
     async def failing_post(overpass_query: str):
         raise PlacesError("upstream is down")
@@ -372,15 +372,15 @@ def test_inflight_entry_is_released_after_failure(monkeypatch):
 
 # A throttled primary must fall through to a mirror rather than failing.
 def test_rate_limited_primary_falls_back_to_mirror(monkeypatch):
-    from backend.services.places_client import PlacesError, _retryable
+    from backend.services.places_client import PlacesError, mark_retryable
 
-    client = PlacesClient()
+    client = OverpassPlacesClient()
     attempted: list[str] = []
 
     async def flaky_post(endpoint: str, overpass_query: str):
         attempted.append(endpoint)
         if len(attempted) == 1:
-            raise _retryable(PlacesError("rate limited"))
+            raise mark_retryable(PlacesError("rate limited"))
         return {"elements": []}
 
     monkeypatch.setattr(client, "_post_to", flaky_post)
@@ -394,7 +394,7 @@ def test_rate_limited_primary_falls_back_to_mirror(monkeypatch):
 def test_non_retryable_error_does_not_retry(monkeypatch):
     from backend.services.places_client import PlacesError
 
-    client = PlacesClient()
+    client = OverpassPlacesClient()
     attempted: list[str] = []
 
     async def bad_request(endpoint: str, overpass_query: str):
@@ -411,14 +411,14 @@ def test_non_retryable_error_does_not_retry(monkeypatch):
 
 # When every mirror is throttled the user must get the final clear message.
 def test_all_mirrors_failing_raises(monkeypatch):
-    from backend.services.places_client import PlacesError, _retryable
+    from backend.services.places_client import PlacesError, mark_retryable
 
-    client = PlacesClient()
+    client = OverpassPlacesClient()
     attempted: list[str] = []
 
     async def always_throttled(endpoint: str, overpass_query: str):
         attempted.append(endpoint)
-        raise _retryable(PlacesError("rate limited"))
+        raise mark_retryable(PlacesError("rate limited"))
 
     monkeypatch.setattr(client, "_post_to", always_throttled)
 

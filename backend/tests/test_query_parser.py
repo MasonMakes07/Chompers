@@ -6,7 +6,8 @@ from backend.matching import scorer
 from backend.models.guest import Restriction
 from backend.models.party import Party
 from backend.models.restaurant import Restaurant
-from backend.services.places_client import MAX_RESULTS_PER_CALL, PlacesClient
+from backend.services.overpass_client import MAX_RESULTS_PER_CALL
+from backend.services.places_client import OverpassPlacesClient
 from backend.services.query_parser import parse_query
 
 BASE_LAT, BASE_LNG = 32.8801, -117.2340
@@ -174,7 +175,7 @@ def test_diet_and_cuisine_together():
 # A diet search must query the diet:* tags, which is the whole improvement.
 def test_diet_search_queries_diet_tags():
     intent = parse_query("vegan")
-    query = PlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
+    query = OverpassPlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
 
     assert '"diet:vegan"~"^(yes|only)$"' in query
 
@@ -182,7 +183,7 @@ def test_diet_search_queries_diet_tags():
 # Dairy-free must cover both spellings OSM uses in the wild.
 def test_dairy_free_covers_both_osm_spellings():
     intent = parse_query("dairy free")
-    query = PlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
+    query = OverpassPlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
 
     assert "diet:dairy_free" in query
     assert "diet:lactose_free" in query
@@ -191,7 +192,7 @@ def test_dairy_free_covers_both_osm_spellings():
 # Cuisine terms must become a cuisine tag filter, not a name filter.
 def test_cuisine_search_queries_cuisine_tag():
     intent = parse_query("sushi")
-    query = PlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
+    query = OverpassPlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
 
     assert '["cuisine"~(' in query.replace('"cuisine"~"(', '["cuisine"~(')
 
@@ -199,7 +200,7 @@ def test_cuisine_search_queries_cuisine_tag():
 # Leftover keywords must fall back to matching the restaurant name.
 def test_keyword_search_queries_name():
     intent = parse_query("Sunday Supper")
-    query = PlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
+    query = OverpassPlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
 
     assert '["name"~"(' in query
 
@@ -207,7 +208,7 @@ def test_keyword_search_queries_name():
 # The built query must remain valid, bounded Overpass QL.
 def test_intent_query_is_well_formed():
     intent = parse_query("vegan sushi downtown")
-    query = PlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
+    query = OverpassPlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
 
     assert query.startswith("[out:json]")
     assert query.endswith(f"out center tags {MAX_RESULTS_PER_CALL};")
@@ -220,7 +221,7 @@ def test_intent_query_is_well_formed():
 )
 def test_terms_cannot_inject_overpass_syntax(hostile):
     intent = parse_query(hostile)
-    query = PlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
+    query = OverpassPlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
 
     # Every structural character must come from our own template, so the
     # parens must still balance and no stray quote may appear in a term.

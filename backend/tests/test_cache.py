@@ -12,7 +12,7 @@ import time
 import pytest
 
 from backend.config import get_settings
-from backend.services.places_client import PlacesClient
+from backend.services.places_client import OverpassPlacesClient
 
 BASE_LAT, BASE_LNG = 32.8801, -117.2340
 
@@ -52,7 +52,7 @@ def cache_dir(tmp_path, monkeypatch):
 
 # Builds a client whose upstream calls are counted rather than performed.
 def make_client(monkeypatch, calls: list[str]):
-    client = PlacesClient()
+    client = OverpassPlacesClient()
 
     async def fake_post(overpass_query: str):
         calls.append(overpass_query)

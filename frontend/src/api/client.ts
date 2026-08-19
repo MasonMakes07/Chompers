@@ -32,8 +32,7 @@ export async function searchRestaurants(
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new Error(
-        "The search took too long. OpenStreetMap's public server is shared " +
-          "and can be slow — try again, or narrow the search radius."
+        "The search took too long. Try again, or narrow the search radius."
       );
     }
     throw error;

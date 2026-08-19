@@ -19,7 +19,7 @@ from .middleware import (
 )
 from .schemas import SearchRequest, SearchResponse
 from .services.geocoder import Geocoder, GeocodingError
-from .services.places_client import PlacesClient, PlacesError
+from .services.places_client import PlacesError, create_places_client
 from .services.query_parser import parse_query
 
 settings = get_settings()
@@ -41,7 +41,7 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-places_client = PlacesClient()
+places_client = create_places_client()
 geocoder = Geocoder()
 
 
@@ -51,11 +51,13 @@ geocoder = Geocoder()
 # Reports service health and whether an API key is configured.
 @app.get("/api/health")
 async def health() -> dict[str, object]:
+    # Reports whether a key was found, never any part of the key itself.
     return {
         "status": "ok",
-        "provider": "openstreetmap",
-        "api_key_required": False,
-        "overpass_url": settings.overpass_url,
+        "provider": places_client.provider_name,
+        "requested_provider": settings.places_provider,
+        "api_key_configured": settings.has_api_key,
+        "dietary_flags_enabled": settings.include_dietary_flags,
     }
 
 

@@ -30,9 +30,17 @@ class Settings:
 
     # Reads and validates all environment variables for this process.
     def __init__(self) -> None:
-        # Retained but unused: the app now runs on OpenStreetMap, which needs
-        # no key at all. Kept so a Google provider could be restored later.
         self.google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+        # "google" or "openstreetmap". Google gives ratings and price levels
+        # but needs a billing account; OpenStreetMap needs nothing and stays
+        # available as a fallback if a key is ever revoked.
+        self.places_provider = os.getenv("PLACES_PROVIDER", "google").strip()
+        # Enterprise dietary fields cut the free Google allowance from 5,000
+        # calls a month to 1,000, and the cuisine priors cover most of the
+        # same ground, so they stay opt-in.
+        self.include_dietary_flags = (
+            os.getenv("INCLUDE_DIETARY_FLAGS", "false").strip().lower() == "true"
+        )
         self.overpass_url = os.getenv(
             "OVERPASS_URL", "https://overpass-api.de/api/interpreter"
         ).strip()

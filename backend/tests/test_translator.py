@@ -8,7 +8,7 @@ from backend.matching.scorer import Evidence, rank_restaurants
 from backend.models.guest import Restriction
 from backend.models.restaurant import Restaurant
 from backend.schemas import GuestRequest, SearchRequest
-from backend.services.places_client import PlacesClient
+from backend.services.places_client import OverpassPlacesClient
 
 BASE_LAT, BASE_LNG = 32.8801, -117.2340
 
@@ -244,7 +244,7 @@ def test_normalize_osm_node():
         },
     }
 
-    restaurant = PlacesClient.normalize_place(raw_element)
+    restaurant = OverpassPlacesClient.normalize_place(raw_element)
 
     assert restaurant.name == "Spice Route"
     assert restaurant.place_id == "node/12345"
@@ -265,7 +265,7 @@ def test_normalize_osm_way_uses_center():
         "tags": {"name": "Big Hall", "amenity": "restaurant"},
     }
 
-    restaurant = PlacesClient.normalize_place(raw_element)
+    restaurant = OverpassPlacesClient.normalize_place(raw_element)
 
     assert restaurant is not None
     assert restaurant.latitude == 32.88
@@ -274,11 +274,11 @@ def test_normalize_osm_way_uses_center():
 
 # Unnamed places are noise on a results page and must be dropped.
 def test_normalize_drops_unnamed_places():
-    assert PlacesClient.normalize_place({"type": "node", "id": 1, "tags": {}}) is None
+    assert OverpassPlacesClient.normalize_place({"type": "node", "id": 1, "tags": {}}) is None
 
 
 # An element with no usable coordinates must be dropped, not defaulted to 0,0.
 def test_normalize_drops_places_without_coordinates():
     element = {"type": "node", "id": 1, "tags": {"name": "Ghost Diner"}}
 
-    assert PlacesClient.normalize_place(element) is None
+    assert OverpassPlacesClient.normalize_place(element) is None

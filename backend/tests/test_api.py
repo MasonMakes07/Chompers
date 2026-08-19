@@ -22,8 +22,9 @@ def test_health_reports_status_not_secrets(client):
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert body["provider"] == "openstreetmap"
-    assert body["api_key_required"] is False
+    assert body["provider"] in ("google", "openstreetmap")
+    assert isinstance(body["api_key_configured"], bool)
+    # The health check may report THAT a key exists, never any part of it.
     assert "GOOGLE_MAPS_API_KEY" not in response.text
     assert "AIza" not in response.text
 
