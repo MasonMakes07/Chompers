@@ -5,6 +5,9 @@ import type { GuestFit, RestaurantResult } from "../types";
 interface ResultCardProps {
   result: RestaurantResult;
   rank: number;
+  /** False when browsing, where there is no party to fit and the score
+   *  would read 100 for every result. */
+  showGroupFit?: boolean;
 }
 
 // Converts meters into a short human-readable distance.
@@ -45,7 +48,11 @@ function badgeText(fit: GuestFit): string {
   return limiting === null ? "no restrictions" : limiting.label;
 }
 
-export function ResultCard({ result, rank }: ResultCardProps) {
+export function ResultCard({
+  result,
+  rank,
+  showGroupFit = true,
+}: ResultCardProps) {
   const groupFitPercent = Math.round(result.group_fit * 100);
   const price = formatPrice(result.price_level);
   const subParts = [formatCuisine(result.cuisine), price].filter(Boolean);
@@ -82,15 +89,19 @@ export function ResultCard({ result, rank }: ResultCardProps) {
           </p>
         </div>
 
-        <div className="result-row__score">
-          <div className={`score-badge score-badge--${scoreTone(groupFitPercent)}`}>
-            {groupFitPercent}
+        {showGroupFit && (
+          <div className="result-row__score">
+            <div
+              className={`score-badge score-badge--${scoreTone(groupFitPercent)}`}
+            >
+              {groupFitPercent}
+            </div>
+            <span className="score-label">Group fit</span>
           </div>
-          <span className="score-label">Group fit</span>
-        </div>
+        )}
       </div>
 
-      {result.guest_fits.length > 0 && (
+      {showGroupFit && result.guest_fits.length > 0 && (
         <ul className="badges">
           {result.guest_fits.map((fit) => (
             <li key={fit.guest_name} className={`badge badge--${fit.status}`}>

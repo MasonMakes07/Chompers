@@ -623,14 +623,6 @@ select {
   margin: 0;
 }
 
-.explainer__note {
-  margin: 1.5rem 0 0;
-  padding-top: 1.15rem;
-  border-top: 1px solid var(--border-strong);
-  font-size: 0.83rem;
-  color: var(--text-muted);
-}
-
 /* --- Results ------------------------------------------------------------- */
 
 .results-card {
@@ -666,8 +658,16 @@ select {
   gap: 0.4rem;
 }
 
-.everyone-badge--partial {
-  color: var(--gold);
+.browse-note {
+  margin: 1rem 0 0;
+  font-size: 0.86rem;
+  color: var(--text-muted);
+}
+
+.browse-note a {
+  color: var(--forest);
+  font-weight: 500;
+  white-space: nowrap;
 }
 
 .summary-chips {

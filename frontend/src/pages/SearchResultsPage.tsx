@@ -1,6 +1,6 @@
 // Results: a distinct screen driven entirely by the URL query string.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ResultCard } from "../components/ResultCard";
 import { SearchBar } from "../components/SearchBar";
@@ -35,7 +35,15 @@ export function SearchResultsPage() {
     guests.map((guest) => [guest.name.trim(), [...guest.restrictions].sort()]),
   ]);
 
+  // The search already issued, so StrictMode's second effect pass does not
+  // fire a duplicate that queues behind the first and stalls the page.
+  const issuedSearchRef = useRef<string | null>(null);
+
   useEffect(() => {
+    const searchKey = `${paramsKey}::${partyKey}`;
+    if (issuedSearchRef.current === searchKey) return;
+    issuedSearchRef.current = searchKey;
+
     const state = parseSearchParams(new URLSearchParams(paramsKey));
     const searchCoordinates = state.coordinates ?? coordinates;
     let isCurrent = true;
@@ -51,14 +59,23 @@ export function SearchResultsPage() {
         return;
       }
 
+      // A typed query is a generic browse: show plenty of nearby places and
+      // do NOT rank them against the party. The group shortlist is what the
+      // planner's "Find our top 5" is for, and mixing the two made a simple
+      // "sushi" lookup silently drop places a guest could not eat at.
+      const isBrowse = state.query.length > 0;
+
       try {
         const result = await searchRestaurants({
           query: state.query || undefined,
-          guest_count: guestCount,
-          guests: guests.map((guest) => ({
-            name: guest.name.trim() || "Guest",
-            restrictions: guest.restrictions,
-          })),
+          guest_count: isBrowse ? 1 : guestCount,
+          guests: isBrowse
+            ? []
+            : guests.map((guest) => ({
+                name: guest.name.trim() || "Guest",
+                restrictions: guest.restrictions,
+              })),
+          limit: isBrowse ? 20 : 5,
           latitude: state.locationQuery
             ? undefined
             : searchCoordinates?.latitude,
@@ -93,13 +110,17 @@ export function SearchResultsPage() {
 
   const state = parseSearchParams(searchParams);
 
+  // A typed query browses places; no query means rank the party's shortlist.
+  const isBrowse = state.query.length > 0;
+
   // Every distinct restriction in the party, for the summary chips.
   const activeRestrictions = RESTRICTIONS.filter((restriction) =>
     guests.some((guest) => guest.restrictions.includes(restriction.id))
   );
 
-  // True only when no guest is poorly served by the top-ranked option.
+  // Only meaningful for a group shortlist, and only when nobody is limited.
   const everyoneFits =
+    !isBrowse &&
     response !== null &&
     response.results.length > 0 &&
     response.results[0].guest_fits.every((fit) => fit.status === "good");
@@ -135,30 +156,49 @@ export function SearchResultsPage() {
       <section className="results-card">
         <div className="results-head">
           <h1 className="results-title">
-            {state.query ? `Results for “${state.query}”` : "Your top 5"}
+            {isBrowse
+              ? `“${state.query}”`
+              : // Say how many we actually found. With several restrictions
+                // most nearby places get ruled out, and calling one result
+                // a "top 5" is simply untrue.
+                `Your top ${response?.results.length ?? 5}`}
           </h1>
-          {response !== null && response.results.length > 0 && (
-            <span
-              className={`everyone-badge ${
-                everyoneFits ? "" : "everyone-badge--partial"
-              }`}
-            >
-              {everyoneFits ? "Everyone can eat here ✓" : "Some limits — see notes"}
-            </span>
+          {everyoneFits && (
+            <span className="everyone-badge">Everyone can eat here ✓</span>
           )}
         </div>
 
         <div className="summary-chips">
-          <span className="summary-chip">
-            {guestCount} {guestCount === 1 ? "person" : "people"}
-          </span>
-          <span className="summary-chip">{radiusLabel(state.radiusMeters)}</span>
-          {activeRestrictions.map((restriction) => (
-            <span key={restriction.id} className="summary-chip">
-              {restriction.label}
-            </span>
-          ))}
+          {isBrowse ? (
+            <>
+              <span className="summary-chip">Places to eat</span>
+              <span className="summary-chip">
+                {radiusLabel(state.radiusMeters)}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="summary-chip">
+                {guestCount} {guestCount === 1 ? "person" : "people"}
+              </span>
+              <span className="summary-chip">
+                {radiusLabel(state.radiusMeters)}
+              </span>
+              {activeRestrictions.map((restriction) => (
+                <span key={restriction.id} className="summary-chip">
+                  {restriction.label}
+                </span>
+              ))}
+            </>
+          )}
         </div>
+
+        {isBrowse && (
+          <p className="browse-note">
+            Browsing all matches — not filtered for anyone's restrictions.{" "}
+            <Link to="/">Plan for your group instead →</Link>
+          </p>
+        )}
 
         {errorMessage && (
           <div className="alert alert--error" style={{ marginTop: "1.5rem" }}>
@@ -182,6 +222,7 @@ export function SearchResultsPage() {
                   key={result.place_id || result.name}
                   result={result}
                   rank={index + 1}
+                  showGroupFit={!isBrowse}
                 />
               ))}
             </div>

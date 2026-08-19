@@ -238,6 +238,64 @@ def test_all_frontend_restriction_ids_are_valid(client, stub_provider):
     assert response.status_code == 200
 
 
+# A browse search must be able to ask for more than the group shortlist.
+def test_browse_limit_is_honored(client, monkeypatch):
+    async def many_places(intent, latitude, longitude, radius_meters):
+        return [make_place(f"Place {index}", "cafe", index / 1e4) for index in range(20)]
+
+    async def fake_reverse(latitude, longitude):
+        return "Portland, OR"
+
+    monkeypatch.setattr(main.places_client, "search_by_intent", many_places)
+    monkeypatch.setattr(main.geocoder, "reverse", fake_reverse)
+
+    response = client.post(
+        "/api/search",
+        json={
+            "query": "cafe",
+            "guest_count": 1,
+            "guests": [],
+            "limit": 20,
+            "latitude": BASE_LAT,
+            "longitude": BASE_LNG,
+            "radius_meters": 5000,
+        },
+    )
+
+    assert len(response.json()["results"]) == 20
+
+
+# Omitting the limit must keep the original five-result shortlist.
+def test_limit_defaults_to_five(client, stub_provider):
+    response = client.post(
+        "/api/search",
+        json={
+            "guest_count": 2,
+            "guests": [],
+            "latitude": BASE_LAT,
+            "longitude": BASE_LNG,
+            "radius_meters": 5000,
+        },
+    )
+
+    assert len(response.json()["results"]) <= 5
+
+
+# An oversized limit must be rejected rather than silently clamped.
+def test_oversized_limit_is_rejected(client):
+    response = client.post(
+        "/api/search",
+        json={
+            "guest_count": 1,
+            "limit": 500,
+            "latitude": BASE_LAT,
+            "longitude": BASE_LNG,
+        },
+    )
+
+    assert response.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # Reverse geocoding endpoint
 # ---------------------------------------------------------------------------

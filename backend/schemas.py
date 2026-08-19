@@ -85,6 +85,8 @@ class SearchRequest(BaseModel):
     location_query: str | None = Field(default=None, max_length=120)
     radius_meters: int = Field(default=5000, ge=500, le=50000)
     max_price_level: int | None = Field(default=None, ge=0, le=4)
+    # Group planning wants a short shortlist; browsing wants a longer list.
+    limit: int = Field(default=5, ge=1, le=20)
 
     # Sanitizes the quick-search query, the other free-text search field.
     @field_validator("query")

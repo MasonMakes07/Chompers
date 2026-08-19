@@ -1,5 +1,7 @@
 """Tests for the OpenStreetMap provider layer: tag mapping and query safety."""
 
+import asyncio
+
 import pytest
 
 from backend.matching import scorer
@@ -276,6 +278,154 @@ def test_reverse_label_falls_back_to_display_name():
 # With no address and no display name at all, the label must still be safe.
 def test_reverse_label_never_returns_empty():
     assert Geocoder._label_from_address({}, "") == "your location"
+
+
+# ---------------------------------------------------------------------------
+# Request deduplication
+# ---------------------------------------------------------------------------
+
+
+# Duplicate concurrent searches must collapse into a single upstream call.
+def test_identical_concurrent_queries_hit_upstream_once(monkeypatch):
+    client = PlacesClient()
+    upstream_calls: list[str] = []
+
+    async def fake_post(overpass_query: str):
+        upstream_calls.append(overpass_query)
+        # Yield control so the duplicate request starts while this is open.
+        await asyncio.sleep(0.05)
+        return {"elements": []}
+
+    monkeypatch.setattr(client, "_post_overpass", fake_post)
+
+    async def search_twice():
+        return await asyncio.gather(
+            client.search_nearby(32.88, -117.23, 5000),
+            client.search_nearby(32.88, -117.23, 5000),
+        )
+
+    first, second = asyncio.run(search_twice())
+
+    assert len(upstream_calls) == 1, (
+        "A double-rendered page must not queue two identical Overpass calls."
+    )
+    assert first == second
+
+
+# Different searches must still each reach upstream on their own.
+def test_different_queries_are_not_deduplicated(monkeypatch):
+    client = PlacesClient()
+    upstream_calls: list[str] = []
+
+    async def fake_post(overpass_query: str):
+        upstream_calls.append(overpass_query)
+        await asyncio.sleep(0.01)
+        return {"elements": []}
+
+    monkeypatch.setattr(client, "_post_overpass", fake_post)
+
+    async def search_two_places():
+        return await asyncio.gather(
+            client.search_nearby(32.88, -117.23, 5000),
+            client.search_nearby(45.51, -122.68, 5000),
+        )
+
+    asyncio.run(search_two_places())
+
+    assert len(upstream_calls) == 2
+
+
+# A finished query must be removed from the in-flight map, not leak.
+def test_inflight_entry_is_released(monkeypatch):
+    client = PlacesClient()
+
+    async def fake_post(overpass_query: str):
+        return {"elements": []}
+
+    monkeypatch.setattr(client, "_post_overpass", fake_post)
+    asyncio.run(client.search_nearby(32.88, -117.23, 5000))
+
+    assert client._inflight == {}
+
+
+# A failed query must also release its slot so a retry can proceed.
+def test_inflight_entry_is_released_after_failure(monkeypatch):
+    from backend.services.places_client import PlacesError
+
+    client = PlacesClient()
+
+    async def failing_post(overpass_query: str):
+        raise PlacesError("upstream is down")
+
+    monkeypatch.setattr(client, "_post_overpass", failing_post)
+
+    with pytest.raises(PlacesError):
+        asyncio.run(client.search_nearby(32.88, -117.23, 5000))
+
+    assert client._inflight == {}
+
+
+# ---------------------------------------------------------------------------
+# Mirror fallback
+# ---------------------------------------------------------------------------
+
+
+# A throttled primary must fall through to a mirror rather than failing.
+def test_rate_limited_primary_falls_back_to_mirror(monkeypatch):
+    from backend.services.places_client import PlacesError, _retryable
+
+    client = PlacesClient()
+    attempted: list[str] = []
+
+    async def flaky_post(endpoint: str, overpass_query: str):
+        attempted.append(endpoint)
+        if len(attempted) == 1:
+            raise _retryable(PlacesError("rate limited"))
+        return {"elements": []}
+
+    monkeypatch.setattr(client, "_post_to", flaky_post)
+    asyncio.run(client.search_nearby(32.88, -117.23, 5000))
+
+    assert len(attempted) == 2, "A retryable failure must try the next mirror."
+    assert attempted[0] != attempted[1]
+
+
+# A non-retryable failure must surface at once, not walk every mirror.
+def test_non_retryable_error_does_not_retry(monkeypatch):
+    from backend.services.places_client import PlacesError
+
+    client = PlacesClient()
+    attempted: list[str] = []
+
+    async def bad_request(endpoint: str, overpass_query: str):
+        attempted.append(endpoint)
+        raise PlacesError("malformed query")
+
+    monkeypatch.setattr(client, "_post_to", bad_request)
+
+    with pytest.raises(PlacesError):
+        asyncio.run(client.search_nearby(32.88, -117.23, 5000))
+
+    assert len(attempted) == 1
+
+
+# When every mirror is throttled the user must get the final clear message.
+def test_all_mirrors_failing_raises(monkeypatch):
+    from backend.services.places_client import PlacesError, _retryable
+
+    client = PlacesClient()
+    attempted: list[str] = []
+
+    async def always_throttled(endpoint: str, overpass_query: str):
+        attempted.append(endpoint)
+        raise _retryable(PlacesError("rate limited"))
+
+    monkeypatch.setattr(client, "_post_to", always_throttled)
+
+    with pytest.raises(PlacesError):
+        asyncio.run(client.search_nearby(32.88, -117.23, 5000))
+
+    assert len(attempted) >= 2, "Every configured endpoint must be tried."
 
 
 # ---------------------------------------------------------------------------

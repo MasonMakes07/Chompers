@@ -6,7 +6,7 @@ from backend.matching import scorer
 from backend.models.guest import Restriction
 from backend.models.party import Party
 from backend.models.restaurant import Restaurant
-from backend.services.places_client import PlacesClient
+from backend.services.places_client import MAX_RESULTS_PER_CALL, PlacesClient
 from backend.services.query_parser import parse_query
 
 BASE_LAT, BASE_LNG = 32.8801, -117.2340
@@ -210,7 +210,7 @@ def test_intent_query_is_well_formed():
     query = PlacesClient._intent_query(intent, BASE_LAT, BASE_LNG, 5000)
 
     assert query.startswith("[out:json]")
-    assert query.endswith(f"out center tags 60;")
+    assert query.endswith(f"out center tags {MAX_RESULTS_PER_CALL};")
     assert query.count("(") == query.count(")")
 
 

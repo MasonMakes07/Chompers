@@ -116,12 +116,6 @@ export function HomePage() {
               </li>
             ))}
           </ol>
-
-          <p className="explainer__note">
-            Data from OpenStreetMap — free, no account, no tracking. That means
-            no star ratings, so results are ranked on dietary fit, cuisine and
-            distance rather than popularity.
-          </p>
         </aside>
       </div>
     </>

@@ -28,6 +28,7 @@ export interface SearchRequest {
   location_query?: string;
   radius_meters: number;
   max_price_level?: number | null;
+  limit?: number;
 }
 
 export interface RestrictionFit {

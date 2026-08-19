@@ -4,6 +4,8 @@ The Google API key never leaves this process. The browser talks only to this
 backend, so no key is ever present in a frontend bundle.
 """
 
+import asyncio
+
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -19,8 +21,6 @@ from .schemas import SearchRequest, SearchResponse
 from .services.geocoder import Geocoder, GeocodingError
 from .services.places_client import PlacesClient, PlacesError
 from .services.query_parser import parse_query
-
-RESULT_LIMIT = 5
 
 settings = get_settings()
 
@@ -75,19 +75,18 @@ async def reverse_geocode(latitude: float, longitude: float) -> dict[str, object
         ) from error
 
 
-# Resolves the search origin from coordinates or a typed city/ZIP.
-async def _resolve_location(payload: SearchRequest) -> tuple[float, float, str]:
-    if payload.latitude is not None and payload.longitude is not None:
-        # Name the spot so results read "near La Jolla" rather than "near
-        # your current location". A failed lookup must not fail the search.
-        try:
-            label = await geocoder.reverse(payload.latitude, payload.longitude)
-        except GeocodingError:
-            label = "your current location"
-        return payload.latitude, payload.longitude, label
-
+# Names a coordinate for display, degrading to a generic phrase on failure.
+async def _name_location(latitude: float, longitude: float) -> str:
     try:
-        return await geocoder.resolve(payload.location_query or "")
+        return await geocoder.reverse(latitude, longitude)
+    except GeocodingError:
+        return "your current location"
+
+
+# Turns a typed city or ZIP into coordinates, or rejects the search.
+async def _geocode_or_reject(location_query: str) -> tuple[float, float, str]:
+    try:
+        return await geocoder.resolve(location_query)
     except GeocodingError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)
@@ -97,11 +96,22 @@ async def _resolve_location(payload: SearchRequest) -> tuple[float, float, str]:
 # Finds the top restaurants that fit the whole party's needs.
 @app.post("/api/search", response_model=SearchResponse)
 async def search(payload: SearchRequest) -> SearchResponse:
-    latitude, longitude, location_label = await _resolve_location(payload)
-
     # A typed query is parsed into diets, cuisines, and leftover keywords, so
     # "vegan" searches the diet:* tags rather than matching letters in a name.
     intent = parse_query(payload.query) if payload.query else None
+
+    resolved_label: str | None = None
+    label_task: asyncio.Task[str] | None = None
+
+    if payload.latitude is not None and payload.longitude is not None:
+        latitude, longitude = payload.latitude, payload.longitude
+        # The coordinates are already known, so naming them is cosmetic.
+        # Run it alongside the search instead of making the search wait.
+        label_task = asyncio.create_task(_name_location(latitude, longitude))
+    else:
+        latitude, longitude, resolved_label = await _geocode_or_reject(
+            payload.location_query or ""
+        )
 
     try:
         if intent is not None and not intent.is_empty:
@@ -113,12 +123,22 @@ async def search(payload: SearchRequest) -> SearchResponse:
                 latitude, longitude, payload.radius_meters
             )
     except PlacesError as error:
+        if label_task is not None:
+            label_task.cancel()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)
         ) from error
 
+    # By now the label lookup has almost certainly finished alongside the
+    # search, so this await usually costs nothing.
+    location_label = (
+        await label_task if label_task is not None else resolved_label or ""
+    )
+
     party = translator.party_from_request(payload, latitude, longitude, intent)
-    ranked, excluded_count = rank_restaurants(candidates, party, limit=RESULT_LIMIT)
+    ranked, excluded_count = rank_restaurants(
+        candidates, party, limit=payload.limit
+    )
 
     return translator.build_search_response(
         ranked=ranked,

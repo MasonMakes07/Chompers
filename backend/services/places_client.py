@@ -37,14 +37,20 @@ OSM_DIET_KEYS: dict[Restriction, tuple[str, ...]] = {
     Restriction.KOSHER: ("diet:kosher",),
 }
 
-MAX_RESULTS_PER_CALL = 60
+# Overpass truncates in its own storage order, NOT by distance, so a small
+# cap silently discards nearby places and ranks an arbitrary subset. Ranking
+# 200 candidates measured at ~8ms, so a generous pool is effectively free and
+# leaves enough survivors after dietary exclusions to fill a top five.
+MAX_RESULTS_PER_CALL = 200
 REQUEST_TIMEOUT_SECONDS = 30.0
 OVERPASS_QUERY_TIMEOUT_SECONDS = 25
 
-# Overpass is a shared volunteer service; never issue concurrent queries.
-_REQUEST_LOCK = asyncio.Lock()
-MIN_SECONDS_BETWEEN_REQUESTS = 1.0
-_last_request_at = 0.0
+# Overpass allocates each client a small number of concurrent "slots" and
+# enforces its own cooldown server-side. It has NO minimum gap between
+# requests - that rule belongs to Nominatim, and applying it here only added
+# latency. Two concurrent queries matches the documented slot allowance.
+MAX_CONCURRENT_QUERIES = 2
+_REQUEST_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +59,15 @@ _last_request_at = 0.0
 class PlacesError(RuntimeError):
     """Raised when the places provider cannot be reached or rejects a query."""
 
+    # True when another mirror is worth trying for the same query.
+    retryable: bool = False
+
+
+# Marks an error as worth retrying against a different Overpass mirror.
+def _retryable(error: PlacesError) -> PlacesError:
+    error.retryable = True
+    return error
+
 
 # ---------------------------------------------------------------------------
 
@@ -60,11 +75,14 @@ class PlacesError(RuntimeError):
 class PlacesClient:
     """Fetches nearby restaurants from Overpass and normalizes them."""
 
-    # Prepares the client with settings and an empty response cache.
+    # Prepares the client with settings, a response cache, and a dedupe map.
     def __init__(self, include_dietary_flags: bool = True) -> None:
         self._settings = get_settings()
         self._include_dietary_flags = include_dietary_flags
         self._cache: dict[tuple, tuple[float, list[Restaurant]]] = {}
+        # Identical queries already in flight, so a duplicate request joins
+        # the existing call instead of queueing a second one behind it.
+        self._inflight: dict[tuple, "asyncio.Task[list[Restaurant]]"] = {}
 
     # Rounds coordinates so nearby searches share one cache entry.
     @staticmethod
@@ -196,8 +214,27 @@ class PlacesClient:
             )
         )
 
-    # Runs one Overpass query, normalizes the elements, and caches them.
+    # Runs a query, collapsing duplicate concurrent requests into one call.
+    #
+    # Without this, a double-rendered page issues the same search twice; the
+    # second waits behind the first on the pacing lock and can outlive the
+    # browser's patience, so a working search looks like a timeout.
     async def _run_query(
+        self, overpass_query: str, cache_key: tuple
+    ) -> list[Restaurant]:
+        existing = self._inflight.get(cache_key)
+        if existing is not None:
+            # shield keeps one caller giving up from cancelling the shared
+            # call that other callers are still waiting on.
+            return await asyncio.shield(existing)
+
+        task = asyncio.create_task(self._execute_query(overpass_query, cache_key))
+        self._inflight[cache_key] = task
+        task.add_done_callback(lambda _: self._inflight.pop(cache_key, None))
+        return await asyncio.shield(task)
+
+    # Performs one Overpass query, normalizes the elements, and caches them.
+    async def _execute_query(
         self, overpass_query: str, cache_key: tuple
     ) -> list[Restaurant]:
         payload = await self._post_overpass(overpass_query)
@@ -211,34 +248,63 @@ class PlacesClient:
         self._cache[cache_key] = (time.monotonic(), restaurants)
         return restaurants
 
-    # Sends the query to Overpass, serialized and paced by the usage policy.
+    # Sends the query to Overpass, falling back across mirrors when needed.
+    #
+    # Mirrors keep independent rate-limit slots, so a throttled or queueing
+    # primary is worth retrying elsewhere rather than making the user sit out
+    # a cooldown. Measured runs hit a 429 after only a few queries.
     async def _post_overpass(self, overpass_query: str) -> dict[str, Any]:
-        global _last_request_at
+        endpoints = self._settings.overpass_endpoints
+        last_error: PlacesError | None = None
 
-        async with _REQUEST_LOCK:
-            elapsed = time.monotonic() - _last_request_at
-            if elapsed < MIN_SECONDS_BETWEEN_REQUESTS:
-                await asyncio.sleep(MIN_SECONDS_BETWEEN_REQUESTS - elapsed)
+        for attempt_index, endpoint in enumerate(endpoints):
+            try:
+                return await self._post_to(endpoint, overpass_query)
+            except PlacesError as error:
+                last_error = error
+                if not self._is_retryable(error) or attempt_index == len(
+                    endpoints
+                ) - 1:
+                    raise
+                continue
 
+        # Unreachable while endpoints is non-empty, but keeps the contract.
+        raise last_error or PlacesError("No OpenStreetMap endpoint configured.")
+
+    # Reports whether a failure is worth retrying against another mirror.
+    @staticmethod
+    def _is_retryable(error: PlacesError) -> bool:
+        return getattr(error, "retryable", False)
+
+    # Posts one query to a single endpoint, capped by the slot allowance.
+    async def _post_to(self, endpoint: str, overpass_query: str) -> dict[str, Any]:
+        async with _REQUEST_SEMAPHORE:
             headers = {"User-Agent": self._settings.user_agent}
             try:
                 async with httpx.AsyncClient(
                     timeout=REQUEST_TIMEOUT_SECONDS
                 ) as client:
                     response = await client.post(
-                        self._settings.overpass_url,
-                        data={"data": overpass_query},
-                        headers=headers,
+                        endpoint, data={"data": overpass_query}, headers=headers
                     )
-            except httpx.RequestError as error:
-                raise PlacesError(
-                    f"Could not reach OpenStreetMap: {error}"
+            except httpx.TimeoutException as error:
+                raise _retryable(
+                    PlacesError(
+                        "OpenStreetMap took too long to answer. It is a shared "
+                        "volunteer server and is sometimes busy - try again "
+                        "in a moment."
+                    )
                 ) from error
-            finally:
-                _last_request_at = time.monotonic()
+            except httpx.RequestError as error:
+                raise _retryable(
+                    PlacesError(f"Could not reach OpenStreetMap: {error}")
+                ) from error
 
         if response.status_code != 200:
-            raise PlacesError(self._describe_error(response))
+            error = PlacesError(self._describe_error(response))
+            if response.status_code in (429, 503, 504):
+                error = _retryable(error)
+            raise error
 
         try:
             return response.json()
@@ -252,13 +318,18 @@ class PlacesClient:
     def _describe_error(response: httpx.Response) -> str:
         if response.status_code == 429:
             return (
-                "OpenStreetMap is rate limiting us. Wait a moment and try "
-                "again - it is a free volunteer service."
+                "Every OpenStreetMap server we tried is rate limiting us. "
+                "Wait about a minute and try again - they are free volunteer "
+                "services with a shared query queue."
             )
-        if response.status_code == 504:
+        if response.status_code in (503, 504):
             return (
-                "The OpenStreetMap query timed out. Try a smaller search "
-                "radius."
+                "The OpenStreetMap servers are busy right now. Try again in "
+                "a moment."
+            )
+        if response.status_code == 400:
+            return (
+                "OpenStreetMap rejected the search. Try different wording."
             )
         return f"OpenStreetMap error {response.status_code}."
 

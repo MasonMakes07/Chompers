@@ -36,6 +36,16 @@ class Settings:
         self.overpass_url = os.getenv(
             "OVERPASS_URL", "https://overpass-api.de/api/interpreter"
         ).strip()
+        # Independent mirrors with their own rate-limit slots. When the
+        # primary is queueing or throttling, retrying elsewhere beats making
+        # the user wait out a cooldown they did not cause.
+        self.overpass_mirrors = self._parse_origins(
+            os.getenv(
+                "OVERPASS_MIRRORS",
+                "https://overpass.kumi.systems/api/interpreter,"
+                "https://overpass.private.coffee/api/interpreter",
+            )
+        )
         # Both Overpass and Nominatim require an identifying User-Agent.
         self.user_agent = os.getenv(
             "USER_AGENT", "Chompers/1.0 (group restaurant matcher)"
@@ -53,6 +63,15 @@ class Settings:
             os.getenv("CACHE_TTL_SECONDS"), default=900, minimum=0
         )
         self.max_request_bytes = 16 * 1024
+
+    # Returns the primary endpoint followed by each configured mirror.
+    @property
+    def overpass_endpoints(self) -> list[str]:
+        endpoints = [self.overpass_url]
+        for mirror in self.overpass_mirrors:
+            if mirror not in endpoints:
+                endpoints.append(mirror)
+        return endpoints
 
     # Splits a comma-separated origin list into clean individual entries.
     @staticmethod

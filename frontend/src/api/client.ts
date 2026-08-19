@@ -2,7 +2,10 @@
 
 import type { SearchRequest, SearchResponse } from "../types";
 
-const REQUEST_TIMEOUT_MS = 15000;
+// Must exceed the backend's own upstream timeout (30s for Overpass) plus its
+// pacing delay. A shorter budget here aborts searches the server would have
+// answered, which surfaces as a "timeout" that was never really one.
+const REQUEST_TIMEOUT_MS = 45000;
 
 // Posts a search to the backend and returns ranked results, or throws.
 export async function searchRestaurants(
@@ -28,7 +31,10 @@ export async function searchRestaurants(
     return (await response.json()) as SearchResponse;
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("The search timed out. Check that the backend is running.");
+      throw new Error(
+        "The search took too long. OpenStreetMap's public server is shared " +
+          "and can be slow — try again, or narrow the search radius."
+      );
     }
     throw error;
   } finally {
