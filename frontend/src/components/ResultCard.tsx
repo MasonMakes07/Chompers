@@ -14,13 +14,14 @@ function formatDistance(meters: number): string {
   return miles < 0.2 ? `${Math.round(meters)} m` : `${miles.toFixed(1)} mi`;
 }
 
-// Renders a price level as dollar signs, or a dash when unknown.
-function formatPrice(priceLevel: number | null): string {
-  return priceLevel === null || priceLevel <= 0 ? "—" : "$".repeat(priceLevel);
+// Renders a price level as dollar signs, or null when the data is absent.
+function formatPrice(priceLevel: number | null): string | null {
+  return priceLevel === null || priceLevel <= 0 ? null : "$".repeat(priceLevel);
 }
 
 export function ResultCard({ result, rank }: ResultCardProps) {
   const groupFitPercent = Math.round(result.group_fit * 100);
+  const price = formatPrice(result.price_level);
 
   return (
     <article className="card">
@@ -41,7 +42,7 @@ export function ResultCard({ result, rank }: ResultCardProps) {
               <span className="card__muted">({result.rating_count})</span>
             </span>
           )}
-          <span>{formatPrice(result.price_level)}</span>
+          {price && <span>{price}</span>}
           <span>{formatDistance(result.distance_meters)}</span>
           {result.open_now !== null && (
             <span className={result.open_now ? "open" : "closed"}>
@@ -85,7 +86,7 @@ export function ResultCard({ result, rank }: ResultCardProps) {
             target="_blank"
             rel="noopener noreferrer"
           >
-            Open in Google Maps →
+            View on OpenStreetMap →
           </a>
         )}
       </div>

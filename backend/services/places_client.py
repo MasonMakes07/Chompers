@@ -1,10 +1,17 @@
-"""Google Places API (New) client.
+"""Restaurant data from OpenStreetMap via the Overpass API.
 
-One user search costs exactly ONE Nearby Search call. The 20 places returned
-are ranked locally by the scorer, which is what keeps usage inside the free
-tier. Responses are cached briefly by rounded location to spend even less.
+No API key, no billing account, no quota to blow through. Overpass is a
+volunteer-run public service, so the cost here is politeness rather than
+money: results are cached, queries are bounded, and a User-Agent identifies
+the app as the usage policy requires.
+
+The class and error names stay provider-neutral on purpose. Everything
+downstream - the scorer, the translator, the frontend - only ever sees
+`Restaurant`, so swapping providers again would touch this file alone.
 """
 
+import asyncio
+import re
 import time
 from typing import Any
 
@@ -12,69 +19,39 @@ import httpx
 
 from ..config import get_settings
 from ..models.restaurant import Restaurant
+from . import osm_tags
 
-NEARBY_SEARCH_URL = "https://places.googleapis.com/v1/places:searchNearby"
-TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+# Amenity values worth returning for a restaurant search.
+FOOD_AMENITIES = "restaurant|cafe|fast_food|pub|bar|ice_cream|food_court"
 
-# Pro-tier fields. Nearby Search Pro allows 5,000 free calls per month.
-BASE_FIELD_MASK = ",".join(
-    (
-        "places.id",
-        "places.displayName",
-        "places.formattedAddress",
-        "places.location",
-        "places.rating",
-        "places.userRatingCount",
-        "places.priceLevel",
-        "places.types",
-        "places.primaryType",
-        "places.googleMapsUri",
-    )
-)
+MAX_RESULTS_PER_CALL = 60
+REQUEST_TIMEOUT_SECONDS = 30.0
+OVERPASS_QUERY_TIMEOUT_SECONDS = 25
 
-# Enterprise-tier fields. Requesting these drops the free allowance from
-# 5,000 to 1,000 calls per month, so they are opt-in via INCLUDE_DIETARY_FLAGS.
-ENTERPRISE_FIELDS = ",".join(
-    ("places.servesVegetarianFood", "places.currentOpeningHours.openNow")
-)
-
-# Google returns price as an enum string; map it to a 0-4 integer.
-PRICE_LEVEL_MAP = {
-    "PRICE_LEVEL_FREE": 0,
-    "PRICE_LEVEL_INEXPENSIVE": 1,
-    "PRICE_LEVEL_MODERATE": 2,
-    "PRICE_LEVEL_EXPENSIVE": 3,
-    "PRICE_LEVEL_VERY_EXPENSIVE": 4,
-}
-
-MAX_RESULTS_PER_CALL = 20
-REQUEST_TIMEOUT_SECONDS = 10.0
+# Overpass is a shared volunteer service; never issue concurrent queries.
+_REQUEST_LOCK = asyncio.Lock()
+MIN_SECONDS_BETWEEN_REQUESTS = 1.0
+_last_request_at = 0.0
 
 
 # ---------------------------------------------------------------------------
 
 
 class PlacesError(RuntimeError):
-    """Raised when the Places API cannot be reached or rejects the request."""
+    """Raised when the places provider cannot be reached or rejects a query."""
 
 
 # ---------------------------------------------------------------------------
 
 
 class PlacesClient:
-    """Fetches nearby restaurants and normalizes them into Restaurant models."""
+    """Fetches nearby restaurants from Overpass and normalizes them."""
 
     # Prepares the client with settings and an empty response cache.
-    def __init__(self, include_dietary_flags: bool = False) -> None:
+    def __init__(self, include_dietary_flags: bool = True) -> None:
         self._settings = get_settings()
         self._include_dietary_flags = include_dietary_flags
         self._cache: dict[tuple, tuple[float, list[Restaurant]]] = {}
-
-    # Builds the field mask, widening it only if enterprise fields are on.
-    def _field_mask(self) -> str:
-        if self._include_dietary_flags:
-            return f"{BASE_FIELD_MASK},{ENTERPRISE_FIELDS}"
-        return BASE_FIELD_MASK
 
     # Rounds coordinates so nearby searches share one cache entry.
     @staticmethod
@@ -103,6 +80,38 @@ class PlacesClient:
             return None
         return restaurants
 
+    # Reduces a user query to bare words, making Overpass injection impossible.
+    @staticmethod
+    def sanitize_query(query: str) -> str:
+        words = re.sub(r"[^A-Za-z0-9 ]+", " ", query).split()
+        return "|".join(words[:4])
+
+    # Builds the Overpass QL for a plain "restaurants near here" search.
+    @staticmethod
+    def _nearby_query(latitude: float, longitude: float, radius: int) -> str:
+        around = f"around:{radius},{latitude},{longitude}"
+        return (
+            f"[out:json][timeout:{OVERPASS_QUERY_TIMEOUT_SECONDS}];"
+            f'nwr["amenity"~"^({FOOD_AMENITIES})$"]["name"]({around});'
+            f"out center tags {MAX_RESULTS_PER_CALL};"
+        )
+
+    # Builds Overpass QL matching a keyword against name or cuisine tags.
+    @staticmethod
+    def _text_query(
+        pattern: str, latitude: float, longitude: float, radius: int
+    ) -> str:
+        around = f"around:{radius},{latitude},{longitude}"
+        amenity_filter = f'["amenity"~"^({FOOD_AMENITIES})$"]'
+        return (
+            f"[out:json][timeout:{OVERPASS_QUERY_TIMEOUT_SECONDS}];"
+            f"("
+            f'nwr{amenity_filter}["name"~"{pattern}",i]({around});'
+            f'nwr{amenity_filter}["cuisine"~"{pattern}",i]({around});'
+            f");"
+            f"out center tags {MAX_RESULTS_PER_CALL};"
+        )
+
     # Fetches restaurants near a point, using the cache when possible.
     async def search_nearby(
         self, latitude: float, longitude: float, radius_meters: int
@@ -112,18 +121,8 @@ class PlacesClient:
         if cached is not None:
             return cached
 
-        payload = {
-            "includedTypes": ["restaurant"],
-            "maxResultCount": MAX_RESULTS_PER_CALL,
-            "rankPreference": "POPULARITY",
-            "locationRestriction": {
-                "circle": {
-                    "center": {"latitude": latitude, "longitude": longitude},
-                    "radius": float(radius_meters),
-                }
-            },
-        }
-        return await self._post_search(NEARBY_SEARCH_URL, payload, cache_key)
+        query = self._nearby_query(latitude, longitude, radius_meters)
+        return await self._run_query(query, cache_key)
 
     # Fetches restaurants matching a free-text query near a point.
     async def search_text(
@@ -134,84 +133,120 @@ class PlacesClient:
         if cached is not None:
             return cached
 
-        # locationBias, not locationRestriction: a strong text match slightly
-        # outside the radius is still worth showing on a keyword search.
-        payload = {
-            "textQuery": query,
-            "includedType": "restaurant",
-            "maxResultCount": MAX_RESULTS_PER_CALL,
-            "locationBias": {
-                "circle": {
-                    "center": {"latitude": latitude, "longitude": longitude},
-                    "radius": float(radius_meters),
-                }
-            },
-        }
-        return await self._post_search(TEXT_SEARCH_URL, payload, cache_key)
+        pattern = self.sanitize_query(query)
+        # A query of pure punctuation leaves nothing searchable, so fall back
+        # to a plain nearby search rather than sending Overpass an empty regex.
+        if not pattern:
+            return await self.search_nearby(latitude, longitude, radius_meters)
 
-    # Posts one Places request, normalizes the results, and caches them.
-    async def _post_search(
-        self, url: str, payload: dict[str, Any], cache_key: tuple
+        overpass_query = self._text_query(
+            pattern, latitude, longitude, radius_meters
+        )
+        return await self._run_query(overpass_query, cache_key)
+
+    # Runs one Overpass query, normalizes the elements, and caches them.
+    async def _run_query(
+        self, overpass_query: str, cache_key: tuple
     ) -> list[Restaurant]:
-        headers = {
-            "Content-Type": "application/json",
-            "X-Goog-Api-Key": self._settings.require_api_key(),
-            "X-Goog-FieldMask": self._field_mask(),
-        }
+        payload = await self._post_overpass(overpass_query)
 
-        try:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-                response = await client.post(url, json=payload, headers=headers)
-        except httpx.RequestError as error:
-            raise PlacesError(f"Could not reach Google Places: {error}") from error
+        restaurants: list[Restaurant] = []
+        for element in payload.get("elements", []):
+            restaurant = self.normalize_place(element)
+            if restaurant is not None:
+                restaurants.append(restaurant)
+
+        self._cache[cache_key] = (time.monotonic(), restaurants)
+        return restaurants
+
+    # Sends the query to Overpass, serialized and paced by the usage policy.
+    async def _post_overpass(self, overpass_query: str) -> dict[str, Any]:
+        global _last_request_at
+
+        async with _REQUEST_LOCK:
+            elapsed = time.monotonic() - _last_request_at
+            if elapsed < MIN_SECONDS_BETWEEN_REQUESTS:
+                await asyncio.sleep(MIN_SECONDS_BETWEEN_REQUESTS - elapsed)
+
+            headers = {"User-Agent": self._settings.user_agent}
+            try:
+                async with httpx.AsyncClient(
+                    timeout=REQUEST_TIMEOUT_SECONDS
+                ) as client:
+                    response = await client.post(
+                        self._settings.overpass_url,
+                        data={"data": overpass_query},
+                        headers=headers,
+                    )
+            except httpx.RequestError as error:
+                raise PlacesError(
+                    f"Could not reach OpenStreetMap: {error}"
+                ) from error
+            finally:
+                _last_request_at = time.monotonic()
 
         if response.status_code != 200:
             raise PlacesError(self._describe_error(response))
 
-        restaurants = [
-            self.normalize_place(place)
-            for place in response.json().get("places", [])
-        ]
-        self._cache[cache_key] = (time.monotonic(), restaurants)
-        return restaurants
+        try:
+            return response.json()
+        except ValueError as error:
+            raise PlacesError(
+                "OpenStreetMap returned a response we could not read."
+            ) from error
 
-    # Turns a Google error response into a message safe to show a user.
+    # Turns an Overpass error response into a message safe to show a user.
     @staticmethod
     def _describe_error(response: httpx.Response) -> str:
-        if response.status_code == 403:
-            return (
-                "Google rejected the API key. Check that Places API (New) is "
-                "enabled and the key restrictions allow it."
-            )
         if response.status_code == 429:
             return (
-                "Daily quota reached. This is the safety cap doing its job - "
-                "try again tomorrow or raise the cap in Google Cloud Console."
+                "OpenStreetMap is rate limiting us. Wait a moment and try "
+                "again - it is a free volunteer service."
             )
-        try:
-            detail = response.json().get("error", {}).get("message", "")
-        except ValueError:
-            detail = ""
-        return f"Places API error {response.status_code}. {detail}".strip()
+        if response.status_code == 504:
+            return (
+                "The OpenStreetMap query timed out. Try a smaller search "
+                "radius."
+            )
+        return f"OpenStreetMap error {response.status_code}."
 
-    # Converts one raw Google place object into a normalized Restaurant.
+    # Converts one raw Overpass element into a Restaurant, or None if unusable.
     @staticmethod
-    def normalize_place(place: dict[str, Any]) -> Restaurant:
-        location = place.get("location") or {}
-        opening_hours = place.get("currentOpeningHours") or {}
+    def normalize_place(element: dict[str, Any]) -> Restaurant | None:
+        tags = element.get("tags") or {}
+        name = tags.get("name", "").strip()
+        if not name:
+            return None
+
+        # Nodes carry lat/lon directly; ways and relations carry a center.
+        center = element.get("center") or {}
+        latitude = element.get("lat", center.get("lat"))
+        longitude = element.get("lon", center.get("lon"))
+        if latitude is None or longitude is None:
+            return None
+
+        types = osm_tags.place_types_from_tags(tags)
+        element_type = element.get("type", "node")
+        element_id = element.get("id", "")
+
         return Restaurant(
-            place_id=place.get("id", ""),
-            name=(place.get("displayName") or {}).get("text", "Unnamed"),
-            latitude=float(location.get("latitude", 0.0)),
-            longitude=float(location.get("longitude", 0.0)),
-            address=place.get("formattedAddress", ""),
-            primary_type=place.get("primaryType", ""),
-            types=list(place.get("types") or []),
-            rating=place.get("rating"),
-            rating_count=int(place.get("userRatingCount") or 0),
-            price_level=PRICE_LEVEL_MAP.get(place.get("priceLevel", "")),
-            open_now=opening_hours.get("openNow"),
-            serves_vegetarian=place.get("servesVegetarianFood"),
-            maps_uri=place.get("googleMapsUri", ""),
-            summary=(place.get("editorialSummary") or {}).get("text", ""),
+            place_id=f"{element_type}/{element_id}",
+            name=name,
+            latitude=float(latitude),
+            longitude=float(longitude),
+            address=osm_tags.address_from_tags(tags),
+            primary_type=types[0],
+            types=types,
+            # OpenStreetMap carries no ratings or price levels at all. Leaving
+            # these as None is honest, and the scorer redistributes their
+            # weight rather than inventing a value.
+            rating=None,
+            rating_count=0,
+            price_level=None,
+            open_now=None,
+            diet_tags=osm_tags.diet_tags_from_tags(tags),
+            maps_uri=(
+                f"https://www.openstreetmap.org/{element_type}/{element_id}"
+            ),
+            summary=tags.get("cuisine", "").replace(";", ", ").replace("_", " "),
         )

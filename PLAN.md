@@ -21,7 +21,7 @@ return the **top 5 nearby restaurants where everyone can actually eat**.
 
 | Decision | Choice | Why |
 |---|---|---|
-| Data source | **Google Places API (New)** | See the research below — it is the only free option with ratings |
+| Data source | **OpenStreetMap via Overpass** | Google was chosen first, then abandoned — see below |
 | Group input | One person enters everyone | No accounts, no database, no shareable-link infrastructure |
 | Location | Geolocation first, typed ZIP fallback | Fastest common path, with an override that always works |
 | Backend | Python + FastAPI | Async, auto-generated `/docs`, matches existing project conventions |
@@ -36,10 +36,10 @@ The first choice was Yelp, because Yelp has real `vegan` / `gluten_free` /
 
 | Provider | Real cost at this volume | Verdict |
 |---|---|---|
-| **Google Places** | **$0** — 5,000 free Nearby Search calls/month | **Chosen.** Card required, neutralized by a quota cap |
+| Google Places | $0 — 5,000 free calls/month | Chosen first, then **blocked**: billing setup failed with `OR_BACR2_44` |
 | Yelp Fusion | 30-day trial, then **$229/month minimum** | Rejected. Free tier discontinued |
 | Foursquare | Ratings/hours are Premium, **$18.75/1,000, no free tier** | Rejected |
-| OpenStreetMap | $0, no signup at all | Rejected. No ratings; `diet:*` tags on only ~7.6% of places |
+| **OpenStreetMap** | **$0, no account, no card, no key** | **Chosen.** No ratings, but structured `diet:*` tags |
 
 Sources: [Google pricing](https://developers.google.com/maps/billing-and-pricing/pricing),
 [Yelp pricing](https://business.yelp.com/data/products/fusion/),
@@ -49,6 +49,28 @@ Sources: [Google pricing](https://developers.google.com/maps/billing-and-pricing
 returns are ranked locally. Burning the free tier would take ~165 searches per
 day, every day. Combined with a Cloud Console quota cap, overage is impossible
 rather than merely unlikely.
+
+### Then Google fell through too
+
+Enabling billing failed repeatedly with `OR_BACR2_44`, a generic rejection
+Google gives no explanation for and offers no self-service fix. Rather than
+stay blocked on a support queue, we switched to **OpenStreetMap**, the one
+option that needs no account, no card, and no billing at all.
+
+This was cheap precisely because it was planned for: `Restaurant` was designed
+provider-agnostic from the start, so the swap touched `places_client.py`,
+`geocoder.py`, and one new mapping module. The scorer, translator, schemas,
+and entire frontend were untouched.
+
+**What we gave up:** star ratings and price levels. OSM has neither.
+**What we gained:** structured `diet:*` tags covering six of the eight
+restrictions as first-party data. Google only ever exposed a single
+vegetarian boolean, so dietary evidence actually got *better*.
+
+Since ratings were only 20% of the score and group fit is 55%, the loss is
+smaller than it sounds. The scorer now renormalizes over whichever components
+have real data, so the missing 20% redistributes onto group fit and distance
+rather than becoming a dead constant that flattens the spread.
 
 ---
 

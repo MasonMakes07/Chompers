@@ -357,6 +357,14 @@ body {
   color: var(--text);
 }
 
+.pitch__note {
+  margin: 1rem 0 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 /* --- Layout -------------------------------------------------------------- */
 
 .layout {

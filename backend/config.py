@@ -30,7 +30,16 @@ class Settings:
 
     # Reads and validates all environment variables for this process.
     def __init__(self) -> None:
+        # Retained but unused: the app now runs on OpenStreetMap, which needs
+        # no key at all. Kept so a Google provider could be restored later.
         self.google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+        self.overpass_url = os.getenv(
+            "OVERPASS_URL", "https://overpass-api.de/api/interpreter"
+        ).strip()
+        # Both Overpass and Nominatim require an identifying User-Agent.
+        self.user_agent = os.getenv(
+            "USER_AGENT", "Chompers/1.0 (group restaurant matcher)"
+        ).strip()
         self.allowed_origins = self._parse_origins(
             os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
         )

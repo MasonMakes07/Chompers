@@ -28,15 +28,12 @@ sick". Thai food scores well for vegetarians and badly for nut allergies.
 
 ## Stack
 
-Python + FastAPI backend, React + Vite + TypeScript frontend, Google Places
-API (New) for restaurant data.
+Python + FastAPI backend, React + Vite + TypeScript frontend, and
+**OpenStreetMap** (Overpass + Nominatim) for restaurant data.
 
 ## Setup
 
-1. Enable **Places API (New)** and **Geocoding API** in Google Cloud, create a
-   restricted key, and **set a ~100/day quota cap**.
-2. Copy `.env.example` to `.env` and add `GOOGLE_MAPS_API_KEY`.
-3. Install and run:
+**No API key. No billing account. No signup.** Clone and run:
 
 ```bash
 python -m pip install -r backend/requirements.txt
@@ -49,9 +46,15 @@ Open `http://localhost:5173`.
 
 ## Cost
 
-One search = one Google API call, and 5,000 are free per month. At normal use
-this costs nothing; the quota cap makes overage impossible rather than merely
-unlikely.
+Free, permanently. OpenStreetMap's Overpass and Nominatim are public,
+keyless services. The app is a polite client: requests are paced to one per
+second, results are cached, and every query is bounded.
+
+The tradeoff is that OSM carries **no star ratings or price levels**, so
+results are ranked on dietary fit, cuisine match, and distance rather than
+popularity. In exchange, OSM publishes structured `diet:*` tags covering six
+of the eight restrictions as first-party data — better dietary evidence than
+the commercial APIs offer.
 
 ## Tests
 
@@ -59,4 +62,4 @@ unlikely.
 python -m pytest backend/tests -q
 ```
 
-The API key is never needed for tests and never reaches the browser.
+126 tests, all on synthetic data — no network calls, nothing to configure.

@@ -27,6 +27,10 @@ class Restaurant:
     price_level: int | None = None
     open_now: bool | None = None
     serves_vegetarian: bool | None = None
+    # Structured first-party diet claims, keyed by Restriction value, with
+    # OSM's vocabulary as values: "only", "yes", "limited", or "no". Any
+    # provider that publishes explicit dietary data fills this in.
+    diet_tags: dict[str, str] = field(default_factory=dict)
     maps_uri: str = ""
     summary: str = ""
 
@@ -36,6 +40,13 @@ class Restaurant:
         self.primary_type = self.primary_type.lower()
         if self.primary_type and self.primary_type not in self.types:
             self.types.insert(0, self.primary_type)
+
+        # Fold a legacy boolean vegetarian flag into the general diet map so
+        # the scorer only ever has to read one source of explicit evidence.
+        if self.serves_vegetarian is not None:
+            self.diet_tags.setdefault(
+                "vegetarian", "yes" if self.serves_vegetarian else "no"
+            )
 
     # Returns the lowercase name, used for keyword evidence like "vegan".
     @property

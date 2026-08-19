@@ -15,14 +15,15 @@ def client():
         yield test_client
 
 
-# The health endpoint must report status without leaking the key itself.
+# The health endpoint must report status without leaking any secret.
 def test_health_reports_status_not_secrets(client):
     response = client.get("/api/health")
 
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "ok"
-    assert isinstance(body["api_key_configured"], bool)
+    assert body["provider"] == "openstreetmap"
+    assert body["api_key_required"] is False
     assert "GOOGLE_MAPS_API_KEY" not in response.text
     assert "AIza" not in response.text
 
@@ -35,7 +36,7 @@ def test_security_headers_are_applied(client):
     assert response.headers["X-Frame-Options"] == "DENY"
 
 
-# A malformed body must be rejected by validation, never reaching Google.
+# A malformed body must be rejected by validation, never reaching the provider.
 def test_invalid_search_is_rejected(client):
     response = client.post("/api/search", json={"guest_count": 99})
 
@@ -64,19 +65,23 @@ def test_hostile_input_is_rejected(client):
     assert response.status_code == 422
 
 
-# Without an API key the service must fail clearly rather than obscurely.
-def test_missing_api_key_returns_clear_error(client, monkeypatch):
+# Searching must not require any API key now that the provider is OSM.
+def test_search_does_not_require_an_api_key(client, monkeypatch):
     from backend import main
 
     monkeypatch.setattr(main.settings, "google_maps_api_key", "")
+
+    async def fake_search_nearby(latitude, longitude, radius_meters):
+        return []
+
+    monkeypatch.setattr(main.places_client, "search_nearby", fake_search_nearby)
 
     response = client.post(
         "/api/search",
         json={"guest_count": 2, "latitude": BASE_LAT, "longitude": BASE_LNG},
     )
 
-    assert response.status_code == 503
-    assert "GOOGLE_MAPS_API_KEY" in response.json()["detail"]
+    assert response.status_code == 200
 
 
 # The rate limiter must eventually reject a flood from one client.

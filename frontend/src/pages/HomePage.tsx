@@ -86,8 +86,8 @@ export function HomePage() {
           <ul className="pitch__list">
             <li>
               <strong>Nobody gets averaged away.</strong> The worst-served guest
-              drives 60% of the score, so one vegan outweighs four omnivores and
-              a better star rating.
+              drives 60% of the score, so one vegan outweighs four omnivores
+              instead of being outvoted by them.
             </li>
             <li>
               <strong>Allergies are not diets.</strong> Thai food is great for
@@ -99,6 +99,11 @@ export function HomePage() {
               is limiting, why, and whether it was verified or inferred.
             </li>
           </ul>
+          <p className="pitch__note">
+            Data from OpenStreetMap — free, no account, no tracking. That means
+            no star ratings, so results are ranked on dietary fit, cuisine, and
+            distance rather than popularity.
+          </p>
         </aside>
       </div>
     </>

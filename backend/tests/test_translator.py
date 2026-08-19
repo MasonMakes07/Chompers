@@ -222,39 +222,63 @@ def test_empty_response_explains_itself():
 
 
 # ---------------------------------------------------------------------------
-# Google response normalization
+# Overpass response normalization
 # ---------------------------------------------------------------------------
 
 
-# A realistic Google payload must normalize into a Restaurant correctly.
-def test_normalize_google_place():
-    raw_place = {
-        "id": "ChIJtest",
-        "displayName": {"text": "Spice Route"},
-        "formattedAddress": "123 Main St, San Diego, CA",
-        "location": {"latitude": 32.88, "longitude": -117.23},
-        "rating": 4.4,
-        "userRatingCount": 512,
-        "priceLevel": "PRICE_LEVEL_MODERATE",
-        "types": ["indian_restaurant", "restaurant", "food"],
-        "primaryType": "indian_restaurant",
-        "googleMapsUri": "https://maps.google.com/?cid=1",
-        "servesVegetarianFood": True,
+# A realistic Overpass node must normalize into a Restaurant correctly.
+def test_normalize_osm_node():
+    raw_element = {
+        "type": "node",
+        "id": 12345,
+        "lat": 32.88,
+        "lon": -117.23,
+        "tags": {
+            "name": "Spice Route",
+            "amenity": "restaurant",
+            "cuisine": "indian",
+            "addr:housenumber": "123",
+            "addr:street": "Main St",
+            "addr:city": "San Diego",
+            "diet:vegetarian": "yes",
+        },
     }
 
-    restaurant = PlacesClient.normalize_place(raw_place)
+    restaurant = PlacesClient.normalize_place(raw_element)
 
     assert restaurant.name == "Spice Route"
-    assert restaurant.price_level == 2
-    assert restaurant.serves_vegetarian is True
+    assert restaurant.place_id == "node/12345"
     assert "indian_restaurant" in restaurant.types
-
-
-# A sparse Google payload must not crash normalization.
-def test_normalize_sparse_google_place():
-    restaurant = PlacesClient.normalize_place({"id": "x"})
-
-    assert restaurant.name == "Unnamed"
+    assert restaurant.diet_tags["vegetarian"] == "yes"
+    assert "123 Main St" in restaurant.address
+    # OpenStreetMap has no ratings or prices; inventing them would be a lie.
     assert restaurant.rating is None
-    assert restaurant.rating_count == 0
     assert restaurant.price_level is None
+
+
+# Ways and relations carry a center rather than lat/lon and must still work.
+def test_normalize_osm_way_uses_center():
+    raw_element = {
+        "type": "way",
+        "id": 999,
+        "center": {"lat": 32.88, "lon": -117.23},
+        "tags": {"name": "Big Hall", "amenity": "restaurant"},
+    }
+
+    restaurant = PlacesClient.normalize_place(raw_element)
+
+    assert restaurant is not None
+    assert restaurant.latitude == 32.88
+    assert restaurant.place_id == "way/999"
+
+
+# Unnamed places are noise on a results page and must be dropped.
+def test_normalize_drops_unnamed_places():
+    assert PlacesClient.normalize_place({"type": "node", "id": 1, "tags": {}}) is None
+
+
+# An element with no usable coordinates must be dropped, not defaulted to 0,0.
+def test_normalize_drops_places_without_coordinates():
+    element = {"type": "node", "id": 1, "tags": {"name": "Ghost Diner"}}
+
+    assert PlacesClient.normalize_place(element) is None

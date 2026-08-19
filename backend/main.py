@@ -4,8 +4,6 @@ The Google API key never leaves this process. The browser talks only to this
 backend, so no key is ever present in a frontend bundle.
 """
 
-import os
-
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,10 +23,6 @@ RESULT_LIMIT = 5
 
 settings = get_settings()
 
-# Enterprise dietary fields are opt-in: they cut the free monthly allowance
-# from 5,000 calls to 1,000, and cuisine priors cover the same ground.
-include_dietary_flags = os.getenv("INCLUDE_DIETARY_FLAGS", "false").lower() == "true"
-
 app = FastAPI(
     title="Chompers API",
     description="Finds restaurants that fit a whole group's dietary needs.",
@@ -46,7 +40,7 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-places_client = PlacesClient(include_dietary_flags=include_dietary_flags)
+places_client = PlacesClient()
 geocoder = Geocoder()
 
 
@@ -58,8 +52,9 @@ geocoder = Geocoder()
 async def health() -> dict[str, object]:
     return {
         "status": "ok",
-        "api_key_configured": settings.has_api_key,
-        "dietary_flags_enabled": include_dietary_flags,
+        "provider": "openstreetmap",
+        "api_key_required": False,
+        "overpass_url": settings.overpass_url,
     }
 
 
@@ -78,19 +73,10 @@ async def _resolve_location(payload: SearchRequest) -> tuple[float, float, str]:
 # Finds the top restaurants that fit the whole party's needs.
 @app.post("/api/search", response_model=SearchResponse)
 async def search(payload: SearchRequest) -> SearchResponse:
-    if not settings.has_api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                "No Google API key configured. Copy .env.example to "
-                "backend/.env and add GOOGLE_MAPS_API_KEY."
-            ),
-        )
-
     latitude, longitude, location_label = await _resolve_location(payload)
 
-    # A free-text query routes to Text Search; otherwise plain Nearby Search.
-    # Both cost exactly one API call.
+    # A free-text query filters on name and cuisine; otherwise every nearby
+    # food place is fetched. Either way it is one Overpass query, no key.
     try:
         if payload.query:
             candidates = await places_client.search_text(

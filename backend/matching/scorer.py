@@ -34,7 +34,25 @@ HARD_FLOOR = 0.25
 RATING_PRIOR_MEAN = 3.9
 RATING_PRIOR_COUNT = 20
 
-# Confidence granted when Google explicitly flags vegetarian service.
+# Confidence granted by an explicit first-party diet claim. OpenStreetMap
+# publishes these as diet:* tags covering six of our eight restrictions,
+# which is stronger evidence than any cuisine prior can be.
+EXPLICIT_DIET_CONFIDENCE = {
+    "only": 0.98,
+    "yes": 0.90,
+    "limited": 0.55,
+    "no": 0.08,
+}
+
+# How each explicit claim is phrased in the "why this ranked" explanation.
+EXPLICIT_DIET_REASON = {
+    "only": "the menu is entirely {label}",
+    "yes": "tagged as serving {label}",
+    "limited": "tagged as limited {label} options",
+    "no": "tagged as not serving {label}",
+}
+
+# Retained so a provider exposing only a vegetarian boolean still works.
 EXPLICIT_FLAG_TRUE = 0.90
 EXPLICIT_FLAG_FALSE = 0.12
 
@@ -143,19 +161,15 @@ def _cuisine_confidence(
 def restriction_confidence(
     restaurant: Restaurant, restriction: Restriction
 ) -> RestrictionFit:
-    # Tier 1: an explicit provider flag beats every inference.
-    if (
-        restriction is Restriction.VEGETARIAN
-        and restaurant.serves_vegetarian is not None
-    ):
-        if restaurant.serves_vegetarian:
-            return RestrictionFit(
-                restriction, EXPLICIT_FLAG_TRUE, Evidence.EXPLICIT,
-                "listed as serving vegetarian food",
-            )
+    # Tier 1: an explicit first-party diet claim beats every inference.
+    claimed_value = restaurant.diet_tags.get(restriction.value)
+    if claimed_value in EXPLICIT_DIET_CONFIDENCE:
+        label = RESTRICTION_LABELS.get(restriction, restriction.value)
         return RestrictionFit(
-            restriction, EXPLICIT_FLAG_FALSE, Evidence.EXPLICIT,
-            "not listed as serving vegetarian food",
+            restriction,
+            EXPLICIT_DIET_CONFIDENCE[claimed_value],
+            Evidence.EXPLICIT,
+            EXPLICIT_DIET_REASON[claimed_value].format(label=label),
         )
 
     # Tier 2: a self-declared name is strong evidence.
@@ -263,17 +277,33 @@ def score_restaurant(restaurant: Restaurant, party: Party) -> ScoredRestaurant:
     group_fit = group_fit_score(guest_fits)
     distance = restaurant.distance_meters_from(party.latitude, party.longitude)
 
-    total = (
-        WEIGHT_GROUP_FIT * group_fit
-        + WEIGHT_RATING * rating_score(restaurant.rating, restaurant.rating_count)
-        + WEIGHT_DISTANCE * distance_score(distance, party.radius_meters)
-        + WEIGHT_CUISINE
-        * cuisine_preference_score(
-            restaurant, party.liked_cuisines(), party.disliked_cuisines()
+    # Only components with real data contribute, and the total is renormalized
+    # by the weights actually used. A provider without ratings or prices (as
+    # OpenStreetMap is) therefore shifts that influence onto group fit and
+    # distance, instead of scoring every restaurant with the same dead
+    # constant and letting it silently compress the spread.
+    components: list[tuple[float, float]] = [
+        (WEIGHT_GROUP_FIT, group_fit),
+        (WEIGHT_DISTANCE, distance_score(distance, party.radius_meters)),
+        (
+            WEIGHT_CUISINE,
+            cuisine_preference_score(
+                restaurant, party.liked_cuisines(), party.disliked_cuisines()
+            ),
+        ),
+    ]
+    if restaurant.rating is not None:
+        components.append(
+            (WEIGHT_RATING, rating_score(restaurant.rating, restaurant.rating_count))
         )
-        + WEIGHT_PRICE
-        * price_fit_score(restaurant.price_level, party.max_price_level)
-    )
+    if party.max_price_level is not None and restaurant.price_level is not None:
+        components.append(
+            (WEIGHT_PRICE, price_fit_score(restaurant.price_level,
+                                           party.max_price_level))
+        )
+
+    total_weight = sum(weight for weight, _ in components)
+    total = sum(weight * value for weight, value in components) / total_weight
 
     warnings = _build_warnings(restaurant, party, guest_fits)
     return ScoredRestaurant(
