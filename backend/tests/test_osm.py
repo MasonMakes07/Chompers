@@ -170,7 +170,7 @@ def test_negative_diet_tag_disqualifies():
 # ---------------------------------------------------------------------------
 
 
-# Query sanitization must strip everything that could break out of the regex.
+# Term escaping must strip everything that could break out of the query.
 @pytest.mark.parametrize(
     "hostile",
     [
@@ -181,28 +181,22 @@ def test_negative_diet_tag_disqualifies():
         "(.a;.b;)",
     ],
 )
-def test_sanitized_query_contains_no_overpass_syntax(hostile):
-    pattern = PlacesClient.sanitize_query(hostile)
+def test_escaped_term_contains_no_overpass_syntax(hostile):
+    term = PlacesClient._escape_term(hostile)
 
-    for dangerous in ('"', "\\", "[", "]", "(", ")", ";", "/"):
-        assert dangerous not in pattern
-
-
-# Ordinary multi-word queries must become a usable alternation pattern.
-def test_sanitized_query_builds_alternation():
-    assert PlacesClient.sanitize_query("cheap tacos") == "cheap|tacos"
+    for dangerous in ('"', "\\", "[", "]", "(", ")", ";", "/", " "):
+        assert dangerous not in term
 
 
-# A query of pure punctuation must sanitize to nothing, not to broken syntax.
-def test_punctuation_only_query_is_empty():
-    assert PlacesClient.sanitize_query("!!!???") == ""
+# Ordinary cuisine values must survive escaping untouched.
+def test_escaped_term_keeps_valid_cuisine_values():
+    assert PlacesClient._escape_term("steak_house") == "steak_house"
+    assert PlacesClient._escape_term("ice_cream") == "ice_cream"
 
 
-# Long queries must be capped so the Overpass regex stays cheap to evaluate.
-def test_sanitized_query_is_capped():
-    pattern = PlacesClient.sanitize_query("one two three four five six seven")
-
-    assert len(pattern.split("|")) == 4
+# A term of pure punctuation must escape to nothing, not to broken syntax.
+def test_escaped_punctuation_only_term_is_empty():
+    assert PlacesClient._escape_term("!!!???") == ""
 
 
 # The generated nearby query must be valid Overpass QL with bounded output.

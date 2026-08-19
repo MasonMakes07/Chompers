@@ -18,6 +18,7 @@ from .middleware import (
 from .schemas import SearchRequest, SearchResponse
 from .services.geocoder import Geocoder, GeocodingError
 from .services.places_client import PlacesClient, PlacesError
+from .services.query_parser import parse_query
 
 RESULT_LIMIT = 5
 
@@ -98,12 +99,14 @@ async def _resolve_location(payload: SearchRequest) -> tuple[float, float, str]:
 async def search(payload: SearchRequest) -> SearchResponse:
     latitude, longitude, location_label = await _resolve_location(payload)
 
-    # A free-text query filters on name and cuisine; otherwise every nearby
-    # food place is fetched. Either way it is one Overpass query, no key.
+    # A typed query is parsed into diets, cuisines, and leftover keywords, so
+    # "vegan" searches the diet:* tags rather than matching letters in a name.
+    intent = parse_query(payload.query) if payload.query else None
+
     try:
-        if payload.query:
-            candidates = await places_client.search_text(
-                payload.query, latitude, longitude, payload.radius_meters
+        if intent is not None and not intent.is_empty:
+            candidates = await places_client.search_by_intent(
+                intent, latitude, longitude, payload.radius_meters
             )
         else:
             candidates = await places_client.search_nearby(
@@ -114,7 +117,7 @@ async def search(payload: SearchRequest) -> SearchResponse:
             status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)
         ) from error
 
-    party = translator.party_from_request(payload, latitude, longitude)
+    party = translator.party_from_request(payload, latitude, longitude, intent)
     ranked, excluded_count = rank_restaurants(candidates, party, limit=RESULT_LIMIT)
 
     return translator.build_search_response(

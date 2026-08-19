@@ -13,6 +13,7 @@ from ..models.guest import ALLERGY_RESTRICTIONS, Guest, RESTRICTION_LABELS
 from ..models.guest import Restriction
 from ..models.party import Party
 from ..models.restaurant import Restaurant
+from ..models.search_intent import SearchIntent
 from . import dietary_rules
 
 # --- Tunable weights. These sum to 1.0. ------------------------------------
@@ -21,6 +22,8 @@ WEIGHT_RATING = 0.20
 WEIGHT_DISTANCE = 0.10
 WEIGHT_CUISINE = 0.10
 WEIGHT_PRICE = 0.05
+# Only applied when the user actually typed a search.
+WEIGHT_QUERY_RELEVANCE = 0.25
 
 # How much the worst-served guest dominates the group score. At 0.6 a single
 # poorly served guest cannot be averaged away by four happy ones.
@@ -257,6 +260,42 @@ def cuisine_preference_score(
     return max(0.0, min(1.0, score))
 
 
+# Scores how directly a restaurant answers what the user actually searched.
+def query_relevance_score(
+    restaurant: Restaurant, intent: SearchIntent
+) -> float:
+    best = 0.0
+
+    # An explicit diet tag is the strongest possible answer to a diet search.
+    for restriction in intent.diets:
+        claimed = restaurant.diet_tags.get(restriction.value)
+        if claimed == "only":
+            best = max(best, 1.0)
+        elif claimed == "yes":
+            best = max(best, 0.95)
+        elif claimed == "no":
+            # Explicitly cannot serve what was asked for: actively wrong.
+            best = max(best, 0.05)
+
+    # A cuisine match is the next best thing, and covers untagged places.
+    if intent.place_types & set(restaurant.types):
+        best = max(best, 0.9)
+
+    if intent.cuisines and intent.cuisines & set(
+        restaurant.summary.replace(", ", ",").split(",")
+    ):
+        best = max(best, 0.85)
+
+    # A name match is weakest: it is how the place brands itself, not what
+    # it serves, so "Vegan Cafe" beats nothing but loses to a diet tag.
+    searchable = restaurant.searchable_name
+    if any(keyword in searchable for keyword in intent.keywords):
+        best = max(best, 0.75)
+
+    # Overpass returned it, so something matched; it just was not strong.
+    return best if best > 0.0 else 0.35
+
+
 # Scores how well the price level fits the party's stated ceiling.
 def price_fit_score(price_level: int | None, max_price_level: int | None) -> float:
     if max_price_level is None:
@@ -300,6 +339,14 @@ def score_restaurant(restaurant: Restaurant, party: Party) -> ScoredRestaurant:
         components.append(
             (WEIGHT_PRICE, price_fit_score(restaurant.price_level,
                                            party.max_price_level))
+        )
+    # Relevance only matters when the user typed something to be relevant to.
+    if party.search_intent is not None and not party.search_intent.is_empty:
+        components.append(
+            (
+                WEIGHT_QUERY_RELEVANCE,
+                query_relevance_score(restaurant, party.search_intent),
+            )
         )
 
     total_weight = sum(weight for weight, _ in components)

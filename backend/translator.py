@@ -8,6 +8,7 @@ Routes stay thin, and the matching engine never knows a browser exists.
 from .matching.scorer import EVIDENCE_IS_VERIFIED, GuestFit, ScoredRestaurant
 from .models.guest import Guest
 from .models.party import Party
+from .models.search_intent import SearchIntent
 from .schemas import (
     GuestFitResponse,
     GuestRequest,
@@ -43,7 +44,10 @@ def guest_from_request(payload: GuestRequest) -> Guest:
 
 # Builds a domain Party from a validated request plus resolved coordinates.
 def party_from_request(
-    payload: SearchRequest, latitude: float, longitude: float
+    payload: SearchRequest,
+    latitude: float,
+    longitude: float,
+    search_intent: SearchIntent | None = None,
 ) -> Party:
     return Party(
         guest_count=payload.guest_count,
@@ -52,6 +56,7 @@ def party_from_request(
         longitude=longitude,
         radius_meters=payload.radius_meters,
         max_price_level=payload.max_price_level,
+        search_intent=search_intent,
     )
 
 

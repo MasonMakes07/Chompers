@@ -81,16 +81,16 @@ def stub_provider(monkeypatch):
             make_place("Green Fork", "vegan_restaurant", 0.003),
         ]
 
-    async def fake_text(query, latitude, longitude, radius_meters):
-        calls["mode"] = "text"
-        calls["query"] = query
+    async def fake_by_intent(intent, latitude, longitude, radius_meters):
+        calls["mode"] = "intent"
+        calls["intent"] = intent
         return [make_place("Sushi Bar", "sushi_restaurant")]
 
     async def fake_reverse(latitude, longitude):
         return "La Jolla, San Diego, CA"
 
     monkeypatch.setattr(main.places_client, "search_nearby", fake_nearby)
-    monkeypatch.setattr(main.places_client, "search_text", fake_text)
+    monkeypatch.setattr(main.places_client, "search_by_intent", fake_by_intent)
     monkeypatch.setattr(main.geocoder, "reverse", fake_reverse)
     return calls
 
@@ -170,8 +170,10 @@ def test_minimal_quick_search_payload(client, stub_provider):
     )
 
     assert response.status_code == 200
-    assert stub_provider["mode"] == "text"
-    assert stub_provider["query"] == "sushi"
+    assert stub_provider["mode"] == "intent"
+    # The raw word must have been parsed into a structured cuisine, not
+    # passed through as an opaque string.
+    assert "sushi" in stub_provider["intent"].cuisines
     assert response.json()["query"] == "sushi"
 
 

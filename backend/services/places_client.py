@@ -18,11 +18,24 @@ from typing import Any
 import httpx
 
 from ..config import get_settings
+from ..models.guest import Restriction
 from ..models.restaurant import Restaurant
+from ..models.search_intent import SearchIntent
 from . import osm_tags
 
 # Amenity values worth returning for a restaurant search.
 FOOD_AMENITIES = "restaurant|cafe|fast_food|pub|bar|ice_cream|food_court"
+
+# OSM tag keys that satisfy each restriction. Nut and shellfish allergies
+# have no OSM tag, so a search for them falls back to cuisine and keywords.
+OSM_DIET_KEYS: dict[Restriction, tuple[str, ...]] = {
+    Restriction.VEGETARIAN: ("diet:vegetarian",),
+    Restriction.VEGAN: ("diet:vegan",),
+    Restriction.GLUTEN_FREE: ("diet:gluten_free",),
+    Restriction.DAIRY_FREE: ("diet:dairy_free", "diet:lactose_free"),
+    Restriction.HALAL: ("diet:halal",),
+    Restriction.KOSHER: ("diet:kosher",),
+}
 
 MAX_RESULTS_PER_CALL = 60
 REQUEST_TIMEOUT_SECONDS = 30.0
@@ -80,12 +93,6 @@ class PlacesClient:
             return None
         return restaurants
 
-    # Reduces a user query to bare words, making Overpass injection impossible.
-    @staticmethod
-    def sanitize_query(query: str) -> str:
-        words = re.sub(r"[^A-Za-z0-9 ]+", " ", query).split()
-        return "|".join(words[:4])
-
     # Builds the Overpass QL for a plain "restaurants near here" search.
     @staticmethod
     def _nearby_query(latitude: float, longitude: float, radius: int) -> str:
@@ -96,21 +103,50 @@ class PlacesClient:
             f"out center tags {MAX_RESULTS_PER_CALL};"
         )
 
-    # Builds Overpass QL matching a keyword against name or cuisine tags.
+    # Builds Overpass QL from a parsed intent as a union of match clauses.
     @staticmethod
-    def _text_query(
-        pattern: str, latitude: float, longitude: float, radius: int
+    def _intent_query(
+        intent: SearchIntent, latitude: float, longitude: float, radius: int
     ) -> str:
         around = f"around:{radius},{latitude},{longitude}"
         amenity_filter = f'["amenity"~"^({FOOD_AMENITIES})$"]'
+        clauses: list[str] = []
+
+        # Diets match the structured diet:* tags, which is the whole point:
+        # "vegan" should find a place tagged diet:vegan=only whatever its name.
+        for restriction in sorted(intent.diets, key=lambda item: item.value):
+            for tag_key in OSM_DIET_KEYS.get(restriction, ()):
+                clauses.append(
+                    f'nwr{amenity_filter}["{tag_key}"~"^(yes|only)$"]({around});'
+                )
+
+        if intent.cuisines:
+            pattern = "|".join(
+                PlacesClient._escape_term(cuisine)
+                for cuisine in sorted(intent.cuisines)
+            )
+            clauses.append(
+                f'nwr{amenity_filter}["cuisine"~"({pattern})",i]({around});'
+            )
+
+        if intent.keywords:
+            pattern = "|".join(
+                PlacesClient._escape_term(word) for word in intent.keywords
+            )
+            clauses.append(
+                f'nwr{amenity_filter}["name"~"({pattern})",i]({around});'
+            )
+
         return (
             f"[out:json][timeout:{OVERPASS_QUERY_TIMEOUT_SECONDS}];"
-            f"("
-            f'nwr{amenity_filter}["name"~"{pattern}",i]({around});'
-            f'nwr{amenity_filter}["cuisine"~"{pattern}",i]({around});'
-            f");"
+            f"({''.join(clauses)});"
             f"out center tags {MAX_RESULTS_PER_CALL};"
         )
+
+    # Strips a term to bare word characters so it cannot alter the query.
+    @staticmethod
+    def _escape_term(term: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_]+", "", term)
 
     # Fetches restaurants near a point, using the cache when possible.
     async def search_nearby(
@@ -124,25 +160,41 @@ class PlacesClient:
         query = self._nearby_query(latitude, longitude, radius_meters)
         return await self._run_query(query, cache_key)
 
-    # Fetches restaurants matching a free-text query near a point.
-    async def search_text(
-        self, query: str, latitude: float, longitude: float, radius_meters: int
+    # Fetches restaurants matching a parsed search intent near a point.
+    async def search_by_intent(
+        self,
+        intent: SearchIntent,
+        latitude: float,
+        longitude: float,
+        radius_meters: int,
     ) -> list[Restaurant]:
-        cache_key = self._cache_key(latitude, longitude, radius_meters, query)
+        # An intent we could not interpret has nothing to filter on, so show
+        # everything nearby rather than sending Overpass an empty union.
+        if intent.is_empty:
+            return await self.search_nearby(latitude, longitude, radius_meters)
+
+        cache_key = self._cache_key(
+            latitude, longitude, radius_meters, self._intent_cache_key(intent)
+        )
         cached = self._read_cache(cache_key)
         if cached is not None:
             return cached
 
-        pattern = self.sanitize_query(query)
-        # A query of pure punctuation leaves nothing searchable, so fall back
-        # to a plain nearby search rather than sending Overpass an empty regex.
-        if not pattern:
-            return await self.search_nearby(latitude, longitude, radius_meters)
-
-        overpass_query = self._text_query(
-            pattern, latitude, longitude, radius_meters
+        overpass_query = self._intent_query(
+            intent, latitude, longitude, radius_meters
         )
         return await self._run_query(overpass_query, cache_key)
+
+    # Builds a stable cache key so equivalent phrasings share one entry.
+    @staticmethod
+    def _intent_cache_key(intent: SearchIntent) -> str:
+        return "|".join(
+            (
+                ",".join(sorted(item.value for item in intent.diets)),
+                ",".join(sorted(intent.cuisines)),
+                ",".join(sorted(intent.keywords)),
+            )
+        )
 
     # Runs one Overpass query, normalizes the elements, and caches them.
     async def _run_query(

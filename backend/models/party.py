@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 
 from .guest import Guest, Restriction
+from .search_intent import SearchIntent
 
 # Above this headcount most restaurants want advance notice, so results carry
 # a "call ahead" notice. Google exposes no capacity field, so this is advice,
@@ -23,6 +24,8 @@ class Party:
     longitude: float = 0.0
     radius_meters: int = 5000
     max_price_level: int | None = None
+    # What the user typed, parsed. None for a plain group search.
+    search_intent: SearchIntent | None = None
 
     # Guarantees headcount is at least the number of described guests.
     def __post_init__(self) -> None:
