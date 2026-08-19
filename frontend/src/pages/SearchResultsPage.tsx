@@ -1,6 +1,6 @@
 // Results: a distinct screen driven entirely by the URL query string.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ResultCard } from "../components/ResultCard";
 import { SearchBar } from "../components/SearchBar";
@@ -50,15 +50,12 @@ export function SearchResultsPage() {
     guests.map((guest) => [guest.name.trim(), [...guest.restrictions].sort()]),
   ]);
 
-  // The search already issued, so StrictMode's second effect pass does not
-  // fire a duplicate that queues behind the first and stalls the page.
-  const issuedSearchRef = useRef<string | null>(null);
-
+  // StrictMode double-invokes this effect in dev, firing two fetches. That is
+  // fine: the `isCurrent` cleanup discards the stale first pass, and the
+  // backend collapses the duplicate into a single upstream call. The live
+  // pass renders. (A ref guard here instead would suppress the live pass and
+  // leave the page stuck on the skeleton.)
   useEffect(() => {
-    const searchKey = `${paramsKey}::${partyKey}`;
-    if (issuedSearchRef.current === searchKey) return;
-    issuedSearchRef.current = searchKey;
-
     const state = parseSearchParams(new URLSearchParams(paramsKey));
     const searchCoordinates = state.coordinates ?? coordinates;
     let isCurrent = true;

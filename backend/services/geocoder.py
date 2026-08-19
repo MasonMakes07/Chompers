@@ -18,6 +18,9 @@ from ..config import get_settings
 
 GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
 REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+# Google's geocoder, used only as a typo-tolerant fallback when Nominatim
+# finds nothing. Requires the "Geocoding API" enabled on the same key.
+GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
 REQUEST_TIMEOUT_SECONDS = 10.0
 
 # Address keys to try for the neighborhood line, most specific first.
@@ -61,6 +64,12 @@ class Geocoder:
 
         body = await self._request(query.strip())
         if not body:
+            # Nominatim has weak typo tolerance, so try Google (which handles
+            # misspellings) before giving up. Same country restriction applies.
+            fallback = await self._google_fallback(query.strip())
+            if fallback is not None:
+                self._cache[normalized_query] = fallback
+                return fallback
             raise GeocodingError(
                 f"Could not find '{query}'. Try a ZIP code or 'City, State'."
             )
@@ -134,8 +143,61 @@ class Geocoder:
             "limit": "1",
             "addressdetails": "0",
         }
+        # Pin the search to the configured countries so an ambiguous or
+        # misspelled query cannot resolve to a same-named place abroad.
+        if self._settings.geocode_country_codes:
+            params["countrycodes"] = self._settings.geocode_country_codes
         body = await self._get(GEOCODE_URL, params)
         return body if isinstance(body, list) else []
+
+    # Resolves via Google's typo-tolerant geocoder, or None when it cannot.
+    # Used only when Nominatim finds nothing, and only if a key is present.
+    async def _google_fallback(
+        self, address: str
+    ) -> tuple[float, float, str] | None:
+        if not self._settings.has_api_key:
+            return None
+
+        params = {"address": address, "key": self._settings.require_api_key()}
+        # Google takes a components filter; restrict to the first country code.
+        primary = self._settings.geocode_country_codes.split(",")[0].strip()
+        if primary:
+            params["components"] = f"country:{primary.upper()}"
+            params["region"] = primary
+
+        body = await self._get_google(params)
+        results = body.get("results") if isinstance(body, dict) else None
+        if not results:
+            return None
+
+        location = results[0].get("geometry", {}).get("location", {})
+        try:
+            return (
+                float(location["lat"]),
+                float(location["lng"]),
+                self._shorten(results[0].get("formatted_address", address)),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    # Sends one request to Google's geocoder, returning JSON or None. Failures
+    # are swallowed so the caller reports the original not-found error, and the
+    # key is never placed anywhere but the outbound query string.
+    async def _get_google(self, params: dict[str, str]):
+        try:
+            async with httpx.AsyncClient(
+                timeout=REQUEST_TIMEOUT_SECONDS
+            ) as client:
+                response = await client.get(GOOGLE_GEOCODE_URL, params=params)
+        except httpx.RequestError:
+            return None
+
+        if response.status_code != 200:
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            return None
 
     # Sends one paced, identified request to Nominatim and returns the JSON.
     async def _get(self, url: str, params: dict[str, str]):

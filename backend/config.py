@@ -58,6 +58,14 @@ class Settings:
         self.user_agent = os.getenv(
             "USER_AGENT", "Chompers/1.0 (group restaurant matcher)"
         ).strip()
+        # Restrict geocoding to these ISO 3166-1 country codes so a typed
+        # "San Francisco, CA" can never resolve to a same-named town abroad.
+        # Nominatim reads a bare "CA" as Canada without this, and a misspelled
+        # city can match a foreign place. Comma-separated; blank allows any
+        # country for a future non-US deployment.
+        self.geocode_country_codes = (
+            os.getenv("GEOCODE_COUNTRY_CODES", "us").strip().lower()
+        )
         self.allowed_origins = self._parse_origins(
             os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
         )
