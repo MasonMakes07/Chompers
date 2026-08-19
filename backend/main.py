@@ -39,6 +39,10 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
+    # Retry-After is not CORS-safelisted, so the browser cannot read it on a
+    # cross-origin 429 unless it is explicitly exposed. The frontend reads it
+    # to tell the user how long to wait.
+    expose_headers=["Retry-After"],
 )
 
 places_client = create_places_client()
