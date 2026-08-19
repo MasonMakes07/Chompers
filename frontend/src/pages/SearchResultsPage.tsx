@@ -13,7 +13,10 @@ import { RESTRICTIONS, type SearchResponse } from "../types";
 const SHORTLIST_SIZE = 5;
 
 // How many are actually ranked and returned, so expanding needs no request.
-const RANKED_POOL_SIZE = 10;
+// Google returns up to 20 per call at the same cost, so ranking all of them
+// (not just 10) costs no extra API call and leaves a fuller shortlist when
+// heavy dietary filtering excludes many candidates.
+const RANKED_POOL_SIZE = 20;
 
 // How many places a keyword browse returns.
 const BROWSE_SIZE = 20;
@@ -32,8 +35,8 @@ export function SearchResultsPage() {
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [isSearching, setIsSearching] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  // Ranks 6-10 are fetched with the first five and held back, so revealing
-  // them costs no network round trip. A second request would be slower.
+  // Ranks beyond the first five are fetched with them and held back, so
+  // revealing them costs no network round trip. A second request would be slower.
   const [visibleCount, setVisibleCount] = useState(SHORTLIST_SIZE);
 
   // The URL is the single source of truth, so a refresh reruns the search.

@@ -5,6 +5,7 @@ backend, so no key is ever present in a frontend bundle.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,10 +25,19 @@ from .services.query_parser import parse_query
 
 settings = get_settings()
 
+
+# Closes the shared upstream HTTP client when the server stops.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await places_client.aclose()
+
+
 app = FastAPI(
     title="Chompers API",
     description="Finds restaurants that fit a whole group's dietary needs.",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(SecurityHeadersMiddleware)

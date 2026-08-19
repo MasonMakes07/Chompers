@@ -73,6 +73,23 @@ class GooglePlacesClient(BasePlacesClient):
     def __init__(self, include_dietary_flags: bool = False) -> None:
         super().__init__()
         self._include_dietary_flags = include_dietary_flags
+        # Created lazily inside the running loop and reused across searches so
+        # the TLS handshake and connection are not rebuilt on every call.
+        self._http_client: httpx.AsyncClient | None = None
+
+    # Returns the pooled HTTP client, creating it on first use.
+    def _client(self) -> httpx.AsyncClient:
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                timeout=REQUEST_TIMEOUT_SECONDS
+            )
+        return self._http_client
+
+    # Closes the pooled client when the server shuts down.
+    async def aclose(self) -> None:
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
 
     # Builds the field mask, widening it only if enterprise fields are on.
     def _field_mask(self) -> str:
@@ -136,10 +153,9 @@ class GooglePlacesClient(BasePlacesClient):
 
         try:
             async with _REQUEST_SEMAPHORE:
-                async with httpx.AsyncClient(
-                    timeout=REQUEST_TIMEOUT_SECONDS
-                ) as client:
-                    response = await client.post(url, json=payload, headers=headers)
+                response = await self._client().post(
+                    url, json=payload, headers=headers
+                )
         except httpx.TimeoutException as error:
             raise mark_retryable(
                 PlacesError("Google Places took too long to answer.")

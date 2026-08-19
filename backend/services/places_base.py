@@ -18,6 +18,14 @@ from ..config import get_settings
 from ..models.restaurant import Restaurant
 from ..models.search_intent import SearchIntent
 
+# Radius buckets in meters. Near-identical radii snap to the same rung so they
+# reuse one upstream call instead of fragmenting the cache. The values the UI
+# offers (1600, 5000, 16000, 40000) are all on the ladder, so real searches are
+# unchanged; only off-ladder radii (e.g. a direct API caller) round up.
+RADIUS_BUCKETS_METERS = (
+    500, 1000, 1600, 3000, 5000, 8000, 16000, 25000, 40000, 50000
+)
+
 
 # ---------------------------------------------------------------------------
 
@@ -52,6 +60,11 @@ class BasePlacesClient(ABC):
         # the existing call instead of queueing a second one behind it.
         self._inflight: dict[tuple, "asyncio.Task[list[Restaurant]]"] = {}
 
+    # Releases any pooled upstream connections. Overridden by providers that
+    # hold a long-lived HTTP client; a no-op for those that do not.
+    async def aclose(self) -> None:
+        return None
+
     # ---- Provider hooks ---------------------------------------------------
 
     # Fetches restaurants near a point. Implemented per provider.
@@ -74,10 +87,20 @@ class BasePlacesClient(ABC):
 
     # ---- Public API -------------------------------------------------------
 
+    # Rounds a radius up to the next cache bucket. Rounding up (never down)
+    # means the searched area always covers what the caller asked for.
+    @staticmethod
+    def _bucket_radius(radius_meters: int) -> int:
+        for bucket in RADIUS_BUCKETS_METERS:
+            if radius_meters <= bucket:
+                return bucket
+        return RADIUS_BUCKETS_METERS[-1]
+
     # Fetches restaurants near a point, using the cache when possible.
     async def search_nearby(
         self, latitude: float, longitude: float, radius_meters: int
     ) -> list[Restaurant]:
+        radius_meters = self._bucket_radius(radius_meters)
         key = self._cache_key(latitude, longitude, radius_meters)
         cached = self._read_cache(key)
         if cached is not None:
@@ -100,6 +123,7 @@ class BasePlacesClient(ABC):
         if intent.is_empty:
             return await self.search_nearby(latitude, longitude, radius_meters)
 
+        radius_meters = self._bucket_radius(radius_meters)
         key = self._cache_key(
             latitude, longitude, radius_meters, self._intent_cache_key(intent)
         )
