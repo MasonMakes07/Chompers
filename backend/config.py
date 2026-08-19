@@ -59,8 +59,18 @@ class Settings:
         self.rate_limit_per_minute = self._parse_int(
             os.getenv("RATE_LIMIT_PER_MINUTE"), default=30, minimum=1
         )
+        # Where cached Overpass responses live between runs. Without this the
+        # cache dies on every reload, which in development is every edit.
+        self.cache_dir = os.getenv(
+            "CACHE_DIR", os.path.join(_PROJECT_ROOT, ".cache", "places")
+        ).strip()
         self.cache_ttl_seconds = self._parse_int(
-            os.getenv("CACHE_TTL_SECONDS"), default=900, minimum=0
+            # OpenStreetMap is volunteer-edited: restaurants appear and close
+            # on a scale of days, not minutes. A 15-minute TTL threw away
+            # good data and paid a multi-second refetch for nothing.
+            os.getenv("CACHE_TTL_SECONDS"),
+            default=86_400,
+            minimum=0,
         )
         self.max_request_bytes = 16 * 1024
 

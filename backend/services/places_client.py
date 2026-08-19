@@ -11,8 +11,12 @@ downstream - the scorer, the translator, the frontend - only ever sees
 """
 
 import asyncio
+import hashlib
+import json
 import re
 import time
+from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -100,16 +104,71 @@ class PlacesClient:
             normalized_query,
         )
 
-    # Returns a cached result set if it has not yet expired.
+    # Maps a cache key to the file that holds it, one file per entry so a
+    # write stays small instead of rewriting the whole cache.
+    def _cache_path(self, key: tuple) -> Path:
+        digest = hashlib.sha256(repr(key).encode("utf-8")).hexdigest()[:32]
+        return Path(self._settings.cache_dir) / f"{digest}.json"
+
+    # Returns a cached result set if it has not yet expired, memory first.
     def _read_cache(self, key: tuple) -> list[Restaurant] | None:
         entry = self._cache.get(key)
-        if entry is None:
-            return None
-        cached_at, restaurants = entry
-        if time.monotonic() - cached_at > self._settings.cache_ttl_seconds:
+        if entry is not None:
+            cached_at, restaurants = entry
+            if time.time() - cached_at <= self._settings.cache_ttl_seconds:
+                return restaurants
             del self._cache[key]
+
+        return self._read_disk_cache(key)
+
+    # Loads one entry from disk, promoting it into memory when still fresh.
+    def _read_disk_cache(self, key: tuple) -> list[Restaurant] | None:
+        path = self._cache_path(key)
+        try:
+            with path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+        except (OSError, ValueError):
+            # A missing or corrupt cache file is never worth failing over.
             return None
+
+        cached_at = payload.get("cached_at", 0)
+        if time.time() - cached_at > self._settings.cache_ttl_seconds:
+            path.unlink(missing_ok=True)
+            return None
+
+        try:
+            restaurants = [
+                Restaurant(**record) for record in payload.get("restaurants", [])
+            ]
+        except TypeError:
+            # The Restaurant shape changed since this file was written.
+            path.unlink(missing_ok=True)
+            return None
+
+        self._cache[key] = (cached_at, restaurants)
         return restaurants
+
+    # Stores a result set in memory and on disk for the next process.
+    def _write_cache(self, key: tuple, restaurants: list[Restaurant]) -> None:
+        cached_at = time.time()
+        self._cache[key] = (cached_at, restaurants)
+
+        path = self._cache_path(key)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "cached_at": cached_at,
+                "restaurants": [asdict(item) for item in restaurants],
+            }
+            # Write then replace, so a crash mid-write cannot leave a
+            # half-written file that later reads as corrupt.
+            temp_path = path.with_suffix(".tmp")
+            with temp_path.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle)
+            temp_path.replace(path)
+        except OSError:
+            # Disk caching is an optimization, never a requirement.
+            pass
 
     # Builds the Overpass QL for a plain "restaurants near here" search.
     @staticmethod
@@ -245,7 +304,7 @@ class PlacesClient:
             if restaurant is not None:
                 restaurants.append(restaurant)
 
-        self._cache[cache_key] = (time.monotonic(), restaurants)
+        self._write_cache(cache_key, restaurants)
         return restaurants
 
     # Sends the query to Overpass, falling back across mirrors when needed.
@@ -255,21 +314,22 @@ class PlacesClient:
     # a cooldown. Measured runs hit a 429 after only a few queries.
     async def _post_overpass(self, overpass_query: str) -> dict[str, Any]:
         endpoints = self._settings.overpass_endpoints
-        last_error: PlacesError | None = None
+        # Report the PRIMARY's failure, not the last mirror's. A mirror being
+        # unreachable is far less informative than the main server saying it
+        # is rate limiting us, and reporting the mirror hides the real cause.
+        primary_error: PlacesError | None = None
 
-        for attempt_index, endpoint in enumerate(endpoints):
+        for endpoint in endpoints:
             try:
                 return await self._post_to(endpoint, overpass_query)
             except PlacesError as error:
-                last_error = error
-                if not self._is_retryable(error) or attempt_index == len(
-                    endpoints
-                ) - 1:
+                if primary_error is None:
+                    primary_error = error
+                if not self._is_retryable(error):
                     raise
                 continue
 
-        # Unreachable while endpoints is non-empty, but keeps the contract.
-        raise last_error or PlacesError("No OpenStreetMap endpoint configured.")
+        raise primary_error or PlacesError("No OpenStreetMap endpoint configured.")
 
     # Reports whether a failure is worth retrying against another mirror.
     @staticmethod

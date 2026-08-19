@@ -9,6 +9,15 @@ import { useParty } from "../context/PartyContext";
 import { buildSearchPath, parseSearchParams } from "../searchParams";
 import { RESTRICTIONS, type SearchResponse } from "../types";
 
+// How many ranked results are shown before "Load more".
+const SHORTLIST_SIZE = 5;
+
+// How many are actually ranked and returned, so expanding needs no request.
+const RANKED_POOL_SIZE = 10;
+
+// How many places a keyword browse returns.
+const BROWSE_SIZE = 20;
+
 // Turns a radius in meters into the same label the form offers.
 function radiusLabel(meters: number): string {
   const miles = Math.round(meters / 1609.34);
@@ -23,6 +32,9 @@ export function SearchResultsPage() {
   const [response, setResponse] = useState<SearchResponse | null>(null);
   const [isSearching, setIsSearching] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Ranks 6-10 are fetched with the first five and held back, so revealing
+  // them costs no network round trip. A second request would be slower.
+  const [visibleCount, setVisibleCount] = useState(SHORTLIST_SIZE);
 
   // The URL is the single source of truth, so a refresh reruns the search.
   const paramsKey = searchParams.toString();
@@ -52,6 +64,8 @@ export function SearchResultsPage() {
     const run = async () => {
       setIsSearching(true);
       setErrorMessage(null);
+      // A new search starts collapsed again.
+      setVisibleCount(SHORTLIST_SIZE);
 
       if (!searchCoordinates && !state.locationQuery) {
         setErrorMessage("No location set. Go back and choose where to search.");
@@ -75,7 +89,7 @@ export function SearchResultsPage() {
                 name: guest.name.trim() || "Guest",
                 restrictions: guest.restrictions,
               })),
-          limit: isBrowse ? 20 : 5,
+          limit: isBrowse ? BROWSE_SIZE : RANKED_POOL_SIZE,
           latitude: state.locationQuery
             ? undefined
             : searchCoordinates?.latitude,
@@ -158,10 +172,13 @@ export function SearchResultsPage() {
           <h1 className="results-title">
             {isBrowse
               ? `“${state.query}”`
-              : // Say how many we actually found. With several restrictions
-                // most nearby places get ruled out, and calling one result
-                // a "top 5" is simply untrue.
-                `Your top ${response?.results.length ?? 5}`}
+              : // Say how many are actually on screen. With several
+                // restrictions most nearby places get ruled out, and calling
+                // one result a "top 5" is simply untrue.
+                `Your top ${Math.min(
+                  visibleCount,
+                  response?.results.length ?? SHORTLIST_SIZE
+                )}`}
           </h1>
           {everyoneFits && (
             <span className="everyone-badge">Everyone can eat here ✓</span>
@@ -217,7 +234,7 @@ export function SearchResultsPage() {
         {response && !isSearching && (
           <>
             <div className="result-list">
-              {response.results.map((result, index) => (
+              {response.results.slice(0, visibleCount).map((result, index) => (
                 <ResultCard
                   key={result.place_id || result.name}
                   result={result}
@@ -226,6 +243,19 @@ export function SearchResultsPage() {
                 />
               ))}
             </div>
+
+            {response.results.length > visibleCount && (
+              <button
+                type="button"
+                className="load-more"
+                onClick={() => setVisibleCount(response.results.length)}
+              >
+                Load more
+                <span className="load-more__count">
+                  {response.results.length - visibleCount} more already ranked
+                </span>
+              </button>
+            )}
 
             {response.results.length === 0 && (
               <div className="alert" style={{ marginTop: "1.5rem" }}>

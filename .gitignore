@@ -3,6 +3,9 @@
 .env.local
 *.key
 
+# Cached Overpass responses
+.cache/
+
 # Python
 __pycache__/
 *.py[cod]
