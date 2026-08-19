@@ -4,6 +4,7 @@ import { useState } from "react";
 import { GuestRow } from "./GuestRow";
 import { requestBrowserLocation } from "../api/client";
 import { useParty } from "../context/PartyContext";
+import { isCodeLike } from "../validation";
 import type { Coordinates, GuestDraft } from "../types";
 
 const MAX_GUESTS = 20;
@@ -54,6 +55,7 @@ export function PartyForm(props: PartyFormProps) {
   const { locationLabel, isNamingLocation } = useParty();
   const [isLocating, setIsLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
+  const [inputError, setInputError] = useState<string | null>(null);
 
   const hasLocation = coordinates !== null || locationQuery.trim().length > 0;
 
@@ -102,6 +104,13 @@ export function PartyForm(props: PartyFormProps) {
       className="card"
       onSubmit={(event) => {
         event.preventDefault();
+        // Reject code-like names or location before hitting the backend.
+        const freeText = [locationQuery, ...guests.map((guest) => guest.name)];
+        if (freeText.some(isCodeLike)) {
+          setInputError("Names and location must be plain text, not code.");
+          return;
+        }
+        setInputError(null);
         onSubmit();
       }}
     >
@@ -274,6 +283,11 @@ export function PartyForm(props: PartyFormProps) {
       >
         {isSearching ? "Searching…" : "Find our top 5"}
       </button>
+      {inputError && (
+        <p className="status-line status-line--warn" role="alert">
+          {inputError}
+        </p>
+      )}
       {!hasLocation && (
         <p className="hint" style={{ textAlign: "center" }}>
           Pick a location to search.

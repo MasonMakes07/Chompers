@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { requestBrowserLocation } from "../api/client";
 import { useParty } from "../context/PartyContext";
+import { isCodeLike } from "../validation";
 
 interface SearchBarProps {
   initialQuery?: string;
@@ -20,6 +21,7 @@ export function SearchBar({
   const [query, setQuery] = useState(initialQuery);
   const [locationQuery, setLocationQuery] = useState(initialLocation);
   const [isLocating, setIsLocating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const hasLocation = coordinates !== null || locationQuery.trim().length > 0;
 
@@ -46,7 +48,15 @@ export function SearchBar({
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!hasLocation) return;
-    onSearch(query.trim(), locationQuery.trim());
+    const trimmedQuery = query.trim();
+    const trimmedLocation = locationQuery.trim();
+    // Reject code-like input up front, mirroring the backend's own guard.
+    if (isCodeLike(trimmedQuery) || isCodeLike(trimmedLocation)) {
+      setError("That looks like code. Use plain words to search.");
+      return;
+    }
+    setError(null);
+    onSearch(trimmedQuery, trimmedLocation);
   };
 
   return (
@@ -123,6 +133,11 @@ export function SearchBar({
           Search
         </button>
       </div>
+      {error && (
+        <p className="searchbar__error" role="alert">
+          {error}
+        </p>
+      )}
     </form>
   );
 }

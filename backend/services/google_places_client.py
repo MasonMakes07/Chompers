@@ -8,6 +8,7 @@ The API key is read from settings and attached in exactly one place here. It
 never appears in a response, a log line, or anything the browser can see.
 """
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -53,6 +54,11 @@ PRICE_LEVEL_MAP = {
 # Google's hard ceiling for a single search response.
 MAX_RESULTS_PER_CALL = 20
 REQUEST_TIMEOUT_SECONDS = 15.0
+
+# Last line of defence: even requests the rate limiter allows must not all
+# reach Google at once. Excess callers queue here instead of stampeding.
+MAX_CONCURRENT_QUERIES = 4
+_REQUEST_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_QUERIES)
 
 
 # ---------------------------------------------------------------------------
@@ -129,8 +135,11 @@ class GooglePlacesClient(BasePlacesClient):
         }
 
         try:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-                response = await client.post(url, json=payload, headers=headers)
+            async with _REQUEST_SEMAPHORE:
+                async with httpx.AsyncClient(
+                    timeout=REQUEST_TIMEOUT_SECONDS
+                ) as client:
+                    response = await client.post(url, json=payload, headers=headers)
         except httpx.TimeoutException as error:
             raise mark_retryable(
                 PlacesError("Google Places took too long to answer.")

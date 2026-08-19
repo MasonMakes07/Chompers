@@ -218,7 +218,11 @@ export function SearchResultsPage() {
         )}
 
         {errorMessage && (
-          <div className="alert alert--error" style={{ marginTop: "1.5rem" }}>
+          <div
+            className="alert alert--error"
+            role="alert"
+            style={{ marginTop: "1.5rem" }}
+          >
             {errorMessage}
           </div>
         )}
@@ -258,7 +262,11 @@ export function SearchResultsPage() {
             )}
 
             {response.results.length === 0 && (
-              <div className="alert" style={{ marginTop: "1.5rem" }}>
+              <div
+                className="alert"
+                role="status"
+                style={{ marginTop: "1.5rem" }}
+              >
                 Nothing came back for that search. Try a wider radius or a
                 broader term.
               </div>

@@ -67,6 +67,39 @@ class Settings:
         self.rate_limit_per_minute = self._parse_int(
             os.getenv("RATE_LIMIT_PER_MINUTE"), default=30, minimum=1
         )
+        # Caps how many of that minute's allowance can land at once. A real
+        # user searches a few times in ten seconds; a script fires hundreds.
+        #
+        # Derived from the per-minute limit rather than fixed, and clamped
+        # below it: a burst cap at or above the minute cap can never fire
+        # first, silently leaving floods unguarded.
+        self.rate_limit_burst = min(
+            self._parse_int(
+                os.getenv("RATE_LIMIT_BURST"),
+                default=max(3, self.rate_limit_per_minute // 3),
+                minimum=1,
+            ),
+            max(1, self.rate_limit_per_minute - 1),
+        )
+        # Ceiling across every client. Per-IP limits alone do not protect the
+        # upstream quota, since many addresses each get their own allowance.
+        self.global_rate_limit_per_minute = self._parse_int(
+            os.getenv("GLOBAL_RATE_LIMIT_PER_MINUTE"), default=120, minimum=1
+        )
+        # Bounds the rate-limit table so cycling source addresses cannot
+        # grow it without limit.
+        self.max_tracked_clients = self._parse_int(
+            os.getenv("MAX_TRACKED_CLIENTS"), default=5_000, minimum=100
+        )
+        # Number of trusted reverse proxies in front of this app. Zero (the
+        # default) means trust only the socket peer and ignore the spoofable
+        # X-Forwarded-For header entirely. Set this to the real proxy hop
+        # count only when every one of those hops is under your control, so
+        # the client IP is read from the right of the chain where a forged
+        # left-hand entry cannot reach it.
+        self.trusted_proxy_count = self._parse_int(
+            os.getenv("TRUSTED_PROXY_COUNT"), default=0, minimum=0
+        )
         # Where cached Overpass responses live between runs. Without this the
         # cache dies on every reload, which in development is every edit.
         self.cache_dir = os.getenv(

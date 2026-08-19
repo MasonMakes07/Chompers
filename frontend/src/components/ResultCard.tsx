@@ -71,7 +71,11 @@ export function ResultCard({
           <p className="result-row__sub">{subParts.join(" · ")}</p>
           <p className="result-row__meta">
             {result.rating !== null && (
-              <span className="rating">★ {result.rating.toFixed(1)}</span>
+              <span className="rating">
+                ★ {result.rating.toFixed(1)}
+                {result.rating_count > 0 &&
+                  ` (${result.rating_count.toLocaleString()})`}
+              </span>
             )}
             <span>{formatDistance(result.distance_meters)}</span>
             {result.open_now !== null && (

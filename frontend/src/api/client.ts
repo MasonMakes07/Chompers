@@ -26,6 +26,9 @@ export async function searchRestaurants(
     });
 
     if (!response.ok) {
+      if (response.status === 429) {
+        throw new Error(rateLimitMessage(response));
+      }
       throw new Error(await readErrorMessage(response));
     }
     return (await response.json()) as SearchResponse;
@@ -39,6 +42,16 @@ export async function searchRestaurants(
   } finally {
     window.clearTimeout(timeoutId);
   }
+}
+
+// Builds a friendly throttling message, telling the user how long to wait.
+function rateLimitMessage(response: Response): string {
+  const retryAfter = Number(response.headers.get("Retry-After"));
+  const wait =
+    Number.isFinite(retryAfter) && retryAfter > 0
+      ? ` Try again in ${retryAfter} second${retryAfter === 1 ? "" : "s"}.`
+      : " Wait a moment and try again.";
+  return `Too many searches at once.${wait}`;
 }
 
 // Extracts a readable message from a failed backend response.

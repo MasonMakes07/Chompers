@@ -175,6 +175,12 @@ select {
   cursor: not-allowed;
 }
 
+.searchbar__error {
+  margin: 0.4rem 0 0;
+  font-size: 0.82rem;
+  color: #97503f;
+}
+
 /* --- Hero ---------------------------------------------------------------- */
 
 .hero {
@@ -815,7 +821,8 @@ select {
 }
 
 .score-badge--strong { background: var(--forest); }
-.score-badge--good { background: var(--gold-soft); }
+/* Dark text: white on gold-soft is ~1.9:1 and fails WCAG AA. */
+.score-badge--good { background: var(--gold-soft); color: var(--text); }
 .score-badge--weak { background: var(--rose); }
 
 .score-label {
