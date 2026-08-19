@@ -1,4 +1,4 @@
-// Home: quick search up top, full group planner below.
+// Home: brand bar with quick search, hero, group planner, and explainer.
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -6,6 +6,21 @@ import { PartyForm } from "../components/PartyForm";
 import { SearchBar } from "../components/SearchBar";
 import { useParty } from "../context/PartyContext";
 import { buildSearchPath } from "../searchParams";
+
+const STEPS = [
+  {
+    title: "Add anyone with a restriction",
+    body: "Allergies, vegan, halal, gluten-free — just the people who need it.",
+  },
+  {
+    title: "Drop a location",
+    body: "Use your current spot or type any city or ZIP code.",
+  },
+  {
+    title: "Get five that fit everyone",
+    body: "We rank nearby options by group fit, cuisine and distance.",
+  },
+];
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -50,20 +65,22 @@ export function HomePage() {
 
   return (
     <>
-      <header className="hero">
-        <h1 className="hero__title">Chompers</h1>
-        <p className="hero__subtitle">
-          Find a spot where <em>everyone</em> can actually eat.
-        </p>
+      <header className="topbar">
+        <span className="brand">Chompers</span>
+        <div className="topbar__search">
+          <SearchBar onSearch={runQuickSearch} />
+        </div>
       </header>
 
-      <SearchBar size="large" onSearch={runQuickSearch} />
-
-      <div className="divider">
-        <span>or plan for the whole group</span>
+      <div className="hero">
+        <h1 className="hero__title">Eat together, no compromises</h1>
+        <p className="hero__subtitle">
+          Find a spot where <em>everyone</em> can actually eat — or use quick
+          search above to browse.
+        </p>
       </div>
 
-      <div className="layout layout--home">
+      <div className="layout">
         <PartyForm
           guestCount={guestCount}
           guests={guests}
@@ -81,27 +98,28 @@ export function HomePage() {
           onSubmit={runPartySearch}
         />
 
-        <aside className="pitch">
-          <h2 className="pitch__title">Why this beats searching Maps</h2>
-          <ul className="pitch__list">
-            <li>
-              <strong>Nobody gets averaged away.</strong> The worst-served guest
-              drives 60% of the score, so one vegan outweighs four omnivores
-              instead of being outvoted by them.
-            </li>
-            <li>
-              <strong>Allergies are not diets.</strong> Thai food is great for
-              vegetarians and risky for nut allergies. We score those
-              separately.
-            </li>
-            <li>
-              <strong>Every result explains itself.</strong> You see which guest
-              is limiting, why, and whether it was verified or inferred.
-            </li>
-          </ul>
-          <p className="pitch__note">
+        <aside className="card">
+          <h2 className="explainer__title">One search, everyone eats</h2>
+          <p className="explainer__lead">
+            Add your group, note who has restrictions, pick a location — we rank
+            the five best nearby spots that work for <em>everyone</em> at once.
+          </p>
+
+          <ol className="steps">
+            {STEPS.map((step, index) => (
+              <li key={step.title} className="step">
+                <span className="step__num">{index + 1}</span>
+                <div>
+                  <p className="step__title">{step.title}</p>
+                  <p className="step__body">{step.body}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+
+          <p className="explainer__note">
             Data from OpenStreetMap — free, no account, no tracking. That means
-            no star ratings, so results are ranked on dietary fit, cuisine, and
+            no star ratings, so results are ranked on dietary fit, cuisine and
             distance rather than popularity.
           </p>
         </aside>

@@ -7,7 +7,13 @@ import { SearchBar } from "../components/SearchBar";
 import { searchRestaurants } from "../api/client";
 import { useParty } from "../context/PartyContext";
 import { buildSearchPath, parseSearchParams } from "../searchParams";
-import type { SearchResponse } from "../types";
+import { RESTRICTIONS, type SearchResponse } from "../types";
+
+// Turns a radius in meters into the same label the form offers.
+function radiusLabel(meters: number): string {
+  const miles = Math.round(meters / 1609.34);
+  return `Within ${miles < 1 ? "1" : miles} mi`;
+}
 
 export function SearchResultsPage() {
   const [searchParams] = useSearchParams();
@@ -78,11 +84,19 @@ export function SearchResultsPage() {
   }, [paramsKey]);
 
   const state = parseSearchParams(searchParams);
-  const restrictedGuestCount = guests.filter(
-    (guest) => guest.restrictions.length > 0
-  ).length;
 
-  // Re-runs the search from the compact bar at the top of this page.
+  // Every distinct restriction in the party, for the summary chips.
+  const activeRestrictions = RESTRICTIONS.filter((restriction) =>
+    guests.some((guest) => guest.restrictions.includes(restriction.id))
+  );
+
+  // True only when no guest is poorly served by the top-ranked option.
+  const everyoneFits =
+    response !== null &&
+    response.results.length > 0 &&
+    response.results[0].guest_fits.every((fit) => fit.status === "good");
+
+  // Re-runs the search from the bar at the top of this page.
   const runSearch = (query: string, locationQuery: string) => {
     navigate(
       buildSearchPath({
@@ -97,41 +111,55 @@ export function SearchResultsPage() {
 
   return (
     <>
-      <header className="resultsHeader">
-        <Link to="/" className="resultsHeader__brand">
+      <header className="topbar">
+        <Link to="/" className="brand">
           Chompers
         </Link>
-        <SearchBar
-          size="compact"
-          initialQuery={state.query}
-          initialLocation={state.locationQuery}
-          onSearch={runSearch}
-        />
+        <div className="topbar__search">
+          <SearchBar
+            initialQuery={state.query}
+            initialLocation={state.locationQuery}
+            onSearch={runSearch}
+          />
+        </div>
       </header>
 
-      <div className="resultsPage">
-        <div className="resultsPage__meta">
-          <h1 className="resultsPage__title">
-            {state.query ? `“${state.query}”` : "Best fits for your group"}
+      <section className="results-card">
+        <div className="results-head">
+          <h1 className="results-title">
+            {state.query ? `Results for “${state.query}”` : "Your top 5"}
           </h1>
-          {restrictedGuestCount > 0 ? (
-            <p className="resultsPage__subtitle">
-              Ranked for {guestCount} {guestCount === 1 ? "person" : "people"},
-              including {restrictedGuestCount} with restrictions.{" "}
-              <Link to="/">Edit party</Link>
-            </p>
-          ) : (
-            <p className="resultsPage__subtitle">
-              No dietary restrictions set — ranked by rating and distance.{" "}
-              <Link to="/">Add restrictions</Link>
-            </p>
+          {response !== null && response.results.length > 0 && (
+            <span
+              className={`everyone-badge ${
+                everyoneFits ? "" : "everyone-badge--partial"
+              }`}
+            >
+              {everyoneFits ? "Everyone can eat here ✓" : "Some limits — see notes"}
+            </span>
           )}
         </div>
 
-        {errorMessage && <div className="alert alert--error">{errorMessage}</div>}
+        <div className="summary-chips">
+          <span className="summary-chip">
+            {guestCount} {guestCount === 1 ? "person" : "people"}
+          </span>
+          <span className="summary-chip">{radiusLabel(state.radiusMeters)}</span>
+          {activeRestrictions.map((restriction) => (
+            <span key={restriction.id} className="summary-chip">
+              {restriction.label}
+            </span>
+          ))}
+        </div>
+
+        {errorMessage && (
+          <div className="alert alert--error" style={{ marginTop: "1.5rem" }}>
+            {errorMessage}
+          </div>
+        )}
 
         {isSearching && (
-          <div className="skeletonList">
+          <div className="skeleton-list">
             {[0, 1, 2, 3, 4].map((index) => (
               <div key={index} className="skeleton" />
             ))}
@@ -140,33 +168,39 @@ export function SearchResultsPage() {
 
         {response && !isSearching && (
           <>
-            <p className="results__summary">
-              Top {response.results.length} of {response.candidates_considered}{" "}
-              near {response.searched_location}
-            </p>
-
-            {response.results.map((result, index) => (
-              <ResultCard
-                key={result.place_id || result.name}
-                result={result}
-                rank={index + 1}
-              />
-            ))}
+            <div className="result-list">
+              {response.results.map((result, index) => (
+                <ResultCard
+                  key={result.place_id || result.name}
+                  result={result}
+                  rank={index + 1}
+                />
+              ))}
+            </div>
 
             {response.results.length === 0 && (
-              <div className="placeholder">
-                <p>Nothing came back for that search.</p>
+              <div className="alert" style={{ marginTop: "1.5rem" }}>
+                Nothing came back for that search. Try a wider radius or a
+                broader term.
               </div>
             )}
 
             <ul className="notes">
+              <li>
+                Searched near {response.searched_location} —{" "}
+                {response.candidates_considered} places considered.
+              </li>
               {response.notes.map((note) => (
                 <li key={note}>{note}</li>
               ))}
             </ul>
           </>
         )}
-      </div>
+
+        <p className="results-footer">
+          <Link to="/">← Edit party and search again</Link>
+        </p>
+      </section>
     </>
   );
 }

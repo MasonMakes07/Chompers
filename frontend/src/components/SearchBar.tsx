@@ -4,19 +4,15 @@ import { useState } from "react";
 import { requestBrowserLocation } from "../api/client";
 import { useParty } from "../context/PartyContext";
 
-const EXAMPLE_QUERIES = ["sushi", "cheap tacos", "vegan brunch", "late night"];
-
 interface SearchBarProps {
   initialQuery?: string;
   initialLocation?: string;
-  size?: "large" | "compact";
   onSearch: (query: string, locationQuery: string) => void;
 }
 
 export function SearchBar({
   initialQuery = "",
   initialLocation = "",
-  size = "large",
   onSearch,
 }: SearchBarProps) {
   const { coordinates, setCoordinates } = useParty();
@@ -45,13 +41,31 @@ export function SearchBar({
   };
 
   return (
-    <form className={`searchbar searchbar--${size}`} onSubmit={submit}>
+    <form className="searchbar" onSubmit={submit}>
       <div className="searchbar__row">
+        <span className="searchbar__icon" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+            <circle
+              cx="11"
+              cy="11"
+              r="7"
+              stroke="currentColor"
+              strokeWidth="2"
+            />
+            <path
+              d="M20 20l-3.5-3.5"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+        </span>
+
         <input
           type="search"
           className="searchbar__query"
           maxLength={120}
-          placeholder="Search food, cuisine, or a vibe…"
+          placeholder="Search restaurants, cuisines, diets…"
           aria-label="Search restaurants"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -78,39 +92,27 @@ export function SearchBar({
           title="Use my location"
           aria-label="Use my location"
         >
-          {isLocating ? "…" : "◎"}
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="2" />
+            <circle cx="12" cy="12" r="2.5" fill="currentColor" />
+            <path
+              d="M12 1v3M12 20v3M1 12h3M20 12h3"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
         </button>
 
         <button
           type="submit"
-          className="button button--primary searchbar__submit"
+          className="searchbar__submit"
           disabled={!hasLocation}
+          title={hasLocation ? undefined : "Choose a location first"}
         >
           Search
         </button>
       </div>
-
-      {size === "large" && (
-        <div className="searchbar__examples">
-          <span className="searchbar__examplesLabel">Try:</span>
-          {EXAMPLE_QUERIES.map((example) => (
-            <button
-              key={example}
-              type="button"
-              className="searchbar__example"
-              onClick={() => setQuery(example)}
-            >
-              {example}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {!hasLocation && size === "large" && (
-        <p className="hint">
-          Add a city or ZIP, or tap ◎ to use your location.
-        </p>
-      )}
     </form>
   );
 }

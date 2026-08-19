@@ -1,8 +1,9 @@
-// The search form: headcount, each guest's restrictions, location, filters.
+// The group planner: headcount, guests with restrictions, location, filters.
 
-import { LocationPicker } from "./LocationPicker";
+import { useState } from "react";
 import { GuestRow } from "./GuestRow";
-import type { GuestDraft } from "../types";
+import { requestBrowserLocation } from "../api/client";
+import type { Coordinates, GuestDraft } from "../types";
 
 const MAX_GUESTS = 20;
 
@@ -13,11 +14,6 @@ const RADIUS_OPTIONS = [
   { meters: 16000, label: "10 mi" },
   { meters: 40000, label: "25 mi" },
 ];
-
-interface Coordinates {
-  latitude: number;
-  longitude: number;
-}
 
 interface PartyFormProps {
   guestCount: number;
@@ -54,17 +50,33 @@ export function PartyForm(props: PartyFormProps) {
     onSubmit,
   } = props;
 
+  const [isLocating, setIsLocating] = useState(false);
+  const [locateFailed, setLocateFailed] = useState(false);
+
   const hasLocation = coordinates !== null || locationQuery.trim().length > 0;
+
+  // Requests coordinates from the browser and clears the typed fallback.
+  const useMyLocation = async () => {
+    setIsLocating(true);
+    setLocateFailed(false);
+    const position = await requestBrowserLocation();
+    setIsLocating(false);
+
+    if (position) {
+      onCoordinatesChange(position);
+      onLocationQueryChange("");
+    } else {
+      setLocateFailed(true);
+    }
+  };
 
   // Appends a blank guest, up to the supported maximum.
   const addGuest = () => {
     if (guests.length >= MAX_GUESTS) return;
-    const newGuest: GuestDraft = {
-      id: crypto.randomUUID(),
-      name: "",
-      restrictions: [],
-    };
-    const nextGuests = [...guests, newGuest];
+    const nextGuests = [
+      ...guests,
+      { id: crypto.randomUUID(), name: "", restrictions: [] },
+    ];
     onGuestsChange(nextGuests);
     if (nextGuests.length > guestCount) {
       onGuestCountChange(nextGuests.length);
@@ -85,81 +97,132 @@ export function PartyForm(props: PartyFormProps) {
 
   return (
     <form
-      className="panel"
+      className="card"
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();
       }}
     >
-      <section className="panel__section">
-        <label className="field">
-          <span className="field__label">How many people?</span>
-          <input
-            type="number"
-            min={1}
-            max={MAX_GUESTS}
-            value={guestCount}
-            className="field__input field__input--number"
-            onChange={(event) =>
-              onGuestCountChange(
-                Math.max(1, Math.min(MAX_GUESTS, Number(event.target.value) || 1))
-              )
-            }
-          />
-        </label>
-        {guestCount >= 6 && (
-          <p className="hint">
-            Large party — we will flag results so you can call ahead. Seating
-            capacity is not something we can verify.
-          </p>
-        )}
-      </section>
-
-      <section className="panel__section">
-        <div className="panel__sectionHeader">
-          <h2 className="panel__title">Who has restrictions?</h2>
-          <button type="button" className="button button--ghost" onClick={addGuest}>
-            + Add person
-          </button>
-        </div>
+      <h2 className="section-title">How many people?</h2>
+      <div className="stepper" style={{ marginTop: "0.75rem" }}>
+        <button
+          type="button"
+          className="stepper__button"
+          aria-label="Remove one person"
+          disabled={guestCount <= Math.max(1, guests.length)}
+          onClick={() => onGuestCountChange(guestCount - 1)}
+        >
+          −
+        </button>
+        <span className="stepper__value" aria-live="polite">
+          {guestCount}
+        </span>
+        <button
+          type="button"
+          className="stepper__button"
+          aria-label="Add one person"
+          disabled={guestCount >= MAX_GUESTS}
+          onClick={() => onGuestCountChange(guestCount + 1)}
+        >
+          +
+        </button>
+      </div>
+      {guestCount >= 6 && (
         <p className="hint">
-          Only add people with restrictions. Everyone else is assumed easy to
-          please.
+          Large party — we will flag results so you can call ahead. Seating
+          capacity is not something we can verify.
         </p>
+      )}
 
-        {guests.length === 0 ? (
-          <p className="empty">
-            No restrictions yet — results will be ranked by rating and distance.
-          </p>
-        ) : (
-          guests.map((guest, index) => (
+      <div className="card__divider" />
+
+      <div className="section-head">
+        <h2 className="section-title">Who has restrictions?</h2>
+        <button type="button" className="button-dark" onClick={addGuest}>
+          + Add person
+        </button>
+      </div>
+      <p className="hint">
+        Only add people with restrictions. Everyone else is assumed easy to
+        please.
+      </p>
+
+      {guests.length === 0 ? (
+        <p className="empty-note">
+          No restrictions yet — results will be ranked by cuisine fit and
+          distance.
+        </p>
+      ) : (
+        <div className="guest-list">
+          {guests.map((guest, index) => (
             <GuestRow
               key={guest.id}
               guest={guest}
               index={index}
-              canRemove
               onChange={updateGuest}
               onRemove={removeGuest}
             />
-          ))
-        )}
-      </section>
+          ))}
+        </div>
+      )}
 
-      <section className="panel__section">
-        <h2 className="panel__title">Where?</h2>
-        <LocationPicker
-          coordinates={coordinates}
-          locationQuery={locationQuery}
-          onCoordinatesChange={onCoordinatesChange}
-          onLocationQueryChange={onLocationQueryChange}
+      <div className="card__divider" />
+
+      <h2 className="section-title">Where?</h2>
+      <div className="location-row" style={{ marginTop: "0.75rem" }}>
+        <button
+          type="button"
+          className={`locate-button ${
+            coordinates ? "locate-button--active" : ""
+          }`}
+          onClick={useMyLocation}
+          disabled={isLocating}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="7" stroke="currentColor" strokeWidth="2" />
+            <circle cx="12" cy="12" r="2.5" fill="currentColor" />
+            <path
+              d="M12 1v3M12 20v3M1 12h3M20 12h3"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            />
+          </svg>
+          {isLocating ? "Locating…" : "Use my location"}
+        </button>
+
+        <span className="location-row__or">or</span>
+
+        <input
+          type="text"
+          className="text-input"
+          maxLength={120}
+          placeholder="Portland, OR"
+          aria-label="City or ZIP code"
+          value={locationQuery}
+          onChange={(event) => {
+            onLocationQueryChange(event.target.value);
+            if (event.target.value) onCoordinatesChange(null);
+          }}
         />
-      </section>
+      </div>
 
-      <section className="panel__section panel__section--inline">
-        <label className="field">
-          <span className="field__label">Within</span>
+      {coordinates && (
+        <p className="status-line status-line--ok">
+          Using your current location.
+        </p>
+      )}
+      {locateFailed && (
+        <p className="status-line status-line--warn">
+          Could not get your location. Type a city or ZIP instead.
+        </p>
+      )}
+
+      <div className="filters-row" style={{ marginTop: "1.25rem" }}>
+        <label>
+          <span className="field-label">Within</span>
           <select
-            className="field__input"
+            className="select-input"
             value={radiusMeters}
             onChange={(event) => onRadiusChange(Number(event.target.value))}
           >
@@ -171,10 +234,10 @@ export function PartyForm(props: PartyFormProps) {
           </select>
         </label>
 
-        <label className="field">
-          <span className="field__label">Max price</span>
+        <label>
+          <span className="field-label">Max price</span>
           <select
-            className="field__input"
+            className="select-input"
             value={maxPriceLevel ?? ""}
             onChange={(event) =>
               onMaxPriceChange(
@@ -189,17 +252,18 @@ export function PartyForm(props: PartyFormProps) {
             <option value={4}>$$$$</option>
           </select>
         </label>
-      </section>
+      </div>
 
       <button
         type="submit"
-        className="button button--primary"
+        className="button-primary"
+        style={{ marginTop: "1.5rem" }}
         disabled={isSearching || !hasLocation}
       >
         {isSearching ? "Searching…" : "Find our top 5"}
       </button>
       {!hasLocation && (
-        <p className="hint hint--center">
+        <p className="hint" style={{ textAlign: "center" }}>
           Pick a location to search.
         </p>
       )}

@@ -62,13 +62,27 @@ Chompers/
    │  ├─ HomePage.tsx        quick search + group planner
    │  └─ SearchResultsPage.tsx   results screen, driven by the URL
    └─ components/
-      ├─ SearchBar.tsx       quick search (large on home, compact on results)
-      ├─ PartyForm.tsx       headcount, guests, location, filters
-      ├─ GuestRow.tsx        one guest's restriction chips
-      ├─ LocationPicker.tsx  geolocation + ZIP fallback
-      ├─ ResultCard.tsx      one ranked restaurant
-      └─ MatchBadge.tsx      per-guest "can eat here" indicator
+      ├─ SearchBar.tsx       pill quick search in the brand bar
+      ├─ PartyForm.tsx       stepper, guests, location, filters
+      ├─ GuestRow.tsx        avatar, restriction summary, expandable chips
+      └─ ResultCard.tsx      ranked row: rank, score badge, guest badges
 ```
+
+Two files are **orphaned by the redesign** and safe to delete:
+`components/LocationPicker.tsx` (absorbed into `PartyForm`) and
+`components/MatchBadge.tsx` (absorbed into `ResultCard`). Both are
+unreferenced and still target CSS classes that no longer exist.
+
+### Visual design
+
+Sage-to-mint gradient page, off-white cards with soft shadows, forest green
+primary, Poppins via Google Fonts. Group-fit scores render as a colored badge
+banded by value — forest ≥96, gold ≥86, rose below.
+
+**The design mockups showed star ratings and price levels, which
+OpenStreetMap does not have.** Those elements are built and will render if a
+provider ever supplies them, but they collapse cleanly on live OSM data, so
+result rows show cuisine and distance rather than `★ 4.8 · $$`.
 
 ---
 
