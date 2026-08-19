@@ -67,16 +67,35 @@ class GuestRequest(BaseModel):
         return cleaned
 
 
-class SearchRequest(BaseModel):
-    """A full search: who is eating, where, and within what limits."""
+MAX_QUERY_LENGTH = 120
 
-    guest_count: int = Field(ge=1, le=MAX_GUESTS)
+
+class SearchRequest(BaseModel):
+    """A search: who is eating, where, and optionally what they are after.
+
+    When `query` is present the backend uses Places Text Search; otherwise it
+    uses Nearby Search. Either way the cost is one API call.
+    """
+
+    query: str | None = Field(default=None, max_length=MAX_QUERY_LENGTH)
+    guest_count: int = Field(default=1, ge=1, le=MAX_GUESTS)
     guests: list[GuestRequest] = Field(default_factory=list, max_length=MAX_GUESTS)
     latitude: float | None = Field(default=None, ge=-90.0, le=90.0)
     longitude: float | None = Field(default=None, ge=-180.0, le=180.0)
     location_query: str | None = Field(default=None, max_length=120)
     radius_meters: int = Field(default=5000, ge=500, le=50000)
     max_price_level: int | None = Field(default=None, ge=0, le=4)
+
+    # Sanitizes the quick-search query, the other free-text search field.
+    @field_validator("query")
+    @classmethod
+    def _clean_query(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        cleaned = " ".join(value.split())
+        if not cleaned:
+            return None
+        return reject_code_like(cleaned, "Search")
 
     # Sanitizes the typed location, which is the only free-text search field.
     @field_validator("location_query")
@@ -151,6 +170,7 @@ class SearchResponse(BaseModel):
 
     results: list[RestaurantResponse]
     searched_location: str
+    query: str | None = None
     candidates_considered: int
     excluded_count: int
     notes: list[str]

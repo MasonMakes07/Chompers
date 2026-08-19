@@ -6,6 +6,10 @@ Enter your headcount and each friend's dietary restrictions, and Chompers ranks
 the top 5 nearby restaurants by how well they serve the *whole* party — not the
 average of it.
 
+In a hurry? Use the quick search bar — type "sushi" or "vegan brunch" and get
+ranked results without setting up a party first. If you have added guests,
+their restrictions still apply.
+
 ## The idea
 
 Most restaurant apps rank by stars, so a group of five with one vegan ends up

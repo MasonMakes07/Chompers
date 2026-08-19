@@ -128,6 +128,7 @@ def build_search_response(
     searched_location: str,
     candidates_considered: int,
     excluded_count: int,
+    query: str | None = None,
 ) -> SearchResponse:
     notes: list[str] = []
 
@@ -143,7 +144,13 @@ def build_search_response(
         )
 
     if not ranked:
-        notes.append("No restaurants found. Try widening the search radius.")
+        if query:
+            notes.append(
+                f"Nothing matched '{query}' nearby. Try a broader term or a "
+                f"wider radius."
+            )
+        else:
+            notes.append("No restaurants found. Try widening the search radius.")
 
     notes.append(
         "Dietary fit is inferred from cuisine and listing data. Confirm with "
@@ -153,6 +160,7 @@ def build_search_response(
     return SearchResponse(
         results=[scored_to_response(item) for item in ranked],
         searched_location=searched_location,
+        query=query,
         candidates_considered=candidates_considered,
         excluded_count=excluded_count,
         notes=notes,

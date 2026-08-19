@@ -14,6 +14,7 @@ from ..config import get_settings
 from ..models.restaurant import Restaurant
 
 NEARBY_SEARCH_URL = "https://places.googleapis.com/v1/places:searchNearby"
+TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 
 # Pro-tier fields. Nearby Search Pro allows 5,000 free calls per month.
 BASE_FIELD_MASK = ",".join(
@@ -78,9 +79,18 @@ class PlacesClient:
     # Rounds coordinates so nearby searches share one cache entry.
     @staticmethod
     def _cache_key(
-        latitude: float, longitude: float, radius_meters: int
+        latitude: float,
+        longitude: float,
+        radius_meters: int,
+        query: str | None = None,
     ) -> tuple:
-        return (round(latitude, 3), round(longitude, 3), radius_meters)
+        normalized_query = query.strip().lower() if query else None
+        return (
+            round(latitude, 3),
+            round(longitude, 3),
+            radius_meters,
+            normalized_query,
+        )
 
     # Returns a cached result set if it has not yet expired.
     def _read_cache(self, key: tuple) -> list[Restaurant] | None:
@@ -113,6 +123,36 @@ class PlacesClient:
                 }
             },
         }
+        return await self._post_search(NEARBY_SEARCH_URL, payload, cache_key)
+
+    # Fetches restaurants matching a free-text query near a point.
+    async def search_text(
+        self, query: str, latitude: float, longitude: float, radius_meters: int
+    ) -> list[Restaurant]:
+        cache_key = self._cache_key(latitude, longitude, radius_meters, query)
+        cached = self._read_cache(cache_key)
+        if cached is not None:
+            return cached
+
+        # locationBias, not locationRestriction: a strong text match slightly
+        # outside the radius is still worth showing on a keyword search.
+        payload = {
+            "textQuery": query,
+            "includedType": "restaurant",
+            "maxResultCount": MAX_RESULTS_PER_CALL,
+            "locationBias": {
+                "circle": {
+                    "center": {"latitude": latitude, "longitude": longitude},
+                    "radius": float(radius_meters),
+                }
+            },
+        }
+        return await self._post_search(TEXT_SEARCH_URL, payload, cache_key)
+
+    # Posts one Places request, normalizes the results, and caches them.
+    async def _post_search(
+        self, url: str, payload: dict[str, Any], cache_key: tuple
+    ) -> list[Restaurant]:
         headers = {
             "Content-Type": "application/json",
             "X-Goog-Api-Key": self._settings.require_api_key(),
@@ -121,9 +161,7 @@ class PlacesClient:
 
         try:
             async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-                response = await client.post(
-                    NEARBY_SEARCH_URL, json=payload, headers=headers
-                )
+                response = await client.post(url, json=payload, headers=headers)
         except httpx.RequestError as error:
             raise PlacesError(f"Could not reach Google Places: {error}") from error
 

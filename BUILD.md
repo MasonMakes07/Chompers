@@ -11,9 +11,10 @@ including what is verified and what is not.
 |---|---|
 | Backend (models, matching, services, API) | Complete |
 | Frontend (React + Vite + TypeScript) | Complete, **installed and builds clean** |
-| Full test suite | **75 tests passing** (4 files, includes 7 API-level tests) |
+| Quick search + routed results page | Complete |
+| Full test suite | **93 tests passing** (5 files, includes 7 API-level tests) |
 | TypeScript compilation | **Passing** under `strict` + `noUnusedLocals` |
-| Production bundle | **Builds** — 152.82 kB JS (49.34 kB gzip), 7.40 kB CSS |
+| Production bundle | **Builds** — 180.14 kB JS (58.60 kB gzip), 10.85 kB CSS |
 | End-to-end against real Google data | **Not yet run** — needs the setup below |
 
 ---
@@ -47,17 +48,53 @@ Chompers/
 │  └─ tests/                 4 test files, 75 tests total
 │
 └─ frontend/src/
-   ├─ App.tsx                state + search flow
+   ├─ App.tsx                route table + PartyProvider
+   ├─ main.tsx               entry point, BrowserRouter
    ├─ types.ts               wire types mirroring schemas.py
+   ├─ searchParams.ts        URL <-> search-state helpers
    ├─ api/client.ts          the only module that calls the backend
+   ├─ context/
+   │  └─ PartyContext.tsx    guests shared across routes + sessionStorage
    ├─ styles.css             warm palette, light + dark aware
+   ├─ pages/
+   │  ├─ HomePage.tsx        quick search + group planner
+   │  └─ SearchResultsPage.tsx   results screen, driven by the URL
    └─ components/
+      ├─ SearchBar.tsx       quick search (large on home, compact on results)
       ├─ PartyForm.tsx       headcount, guests, location, filters
       ├─ GuestRow.tsx        one guest's restriction chips
       ├─ LocationPicker.tsx  geolocation + ZIP fallback
       ├─ ResultCard.tsx      one ranked restaurant
       └─ MatchBadge.tsx      per-guest "can eat here" indicator
 ```
+
+---
+
+## Quick search and routing
+
+Two screens, separated by real URLs via `react-router-dom`:
+
+| Route | Screen |
+|---|---|
+| `/` | Home — quick search bar, group planner, explainer panel |
+| `/search?q=sushi&loc=92093` | Results — compact search bar, ranked cards |
+
+**No new endpoint.** `SearchRequest` gained an optional `query` field. When
+present, `main.py` routes to Places **Text Search**; when absent, **Nearby
+Search**. Same Translator, same scorer, same one-call-per-search cost.
+
+Text Search uses `locationBias` rather than `locationRestriction`, so a strong
+keyword match just outside the radius still appears — the right behavior when
+someone explicitly typed "sushi".
+
+**Restrictions carry over.** Quick searching with guests already added still
+ranks by group fit; the results page says which mode it used. Guests live in
+context plus `sessionStorage` rather than the URL, since a restriction list is
+too personal to put in a shareable link. Location and filters do live in the
+URL, so results are shareable, bookmarkable, and survive a refresh.
+
+The query is sanitized by the same `reject_code_like` rule as every other free
+text field, whitespace-collapsed for cache efficiency, and capped at 120 chars.
 
 ---
 
@@ -108,7 +145,8 @@ same ground. Leave it off.
 | `.env` untracked | **Verified** — absent from `git ls-files` and `git status` |
 | No key in frontend source | **Verified** — zero matches for `AIza`, key name, or `googleapis.com` in `frontend/src/` |
 | No key in compiled bundle | **Verified** — `frontend/dist/` scanned after a real production build, zero matches |
-| Key confined to backend | `config.py` reads it; only `places_client.py:118` and `geocoder.py:43` send it |
+| Key confined to backend | `config.py` reads it; only `places_client.py:158` and `geocoder.py:43` send it |
+| Single auth point | Both search modes funnel through one `_post_search()`, so the key is attached in exactly one place |
 | Rate limiting | Per-IP, 10/min default — protects the Google quota |
 | Input sanitization | Code-like input rejected, not escaped (`CODE_LIKE_PATTERN`) |
 | Bounds | Guests 1–20, radius 500–50,000 m, coordinates range-checked |
@@ -116,7 +154,7 @@ same ground. Leave it off.
 
 ---
 
-## Test coverage — 75 passing
+## Test coverage — 93 passing
 
 **The headline test passes:** `test_one_vegan_outweighs_four_omnivores_and_a_better_rating`
 — 4 omnivores + 1 vegan rank a 4.2★ Indian restaurant above a 4.9★ steakhouse.
@@ -126,6 +164,13 @@ Also covered: hard-floor disqualification, non-empty fallback, allergy-vs-diet
 asymmetry, evidence-tier precedence, Bayesian rating damping, and edge cases —
 empty candidate list, zero guests, one guest holding **every** restriction,
 restaurants missing rating/price/types, and hostile input rejection.
+
+**Quick search** (`test_quick_search.py`, 18 tests): query optional so Nearby
+Search still works, blank queries normalize to `None`, whitespace collapsed,
+overlong queries rejected, and hostile input blocked — including
+`<script>`, SQL injection, `${GOOGLE_MAPS_API_KEY}`, and `javascript:` URIs.
+Cache keys are verified to separate different queries at the same coordinates
+while still collapsing case and padding onto one entry.
 
 ---
 
@@ -151,7 +196,10 @@ Then open `http://localhost:5173`.
 
 **3. Verify end-to-end:**
 - `http://127.0.0.1:8000/api/health` → `api_key_configured: true`
-- Search with a vegan guest; confirm steakhouses are excluded
+- Quick search "sushi" from the home page → lands on `/search?q=sushi`
+- Refresh that results page → the search reruns from the URL
+- Browser Back → returns to home, party intact
+- Add a vegan guest, then search; confirm steakhouses are excluded
 - Check Cloud Console shows only a handful of calls consumed
 
 ---
@@ -168,4 +216,15 @@ Then open `http://localhost:5173`.
   against the documented API shape but have not been exercised against the live
   service — the most likely place for a first-run surprise.
 - **The UI has been compiled but never rendered in a browser.** The build
-  passes; visual layout and the geolocation prompt are unverified.
+  passes; visual layout, the geolocation prompt, and the Back-button behavior
+  are unverified.
+- **Text Search returns different results than Nearby Search.** It uses
+  `locationBias` instead of `locationRestriction`, so a quick search can
+  surface a place slightly outside your radius. That is intentional for
+  keyword searches, but it means the radius filter is a preference there
+  rather than a hard boundary.
+- **A shared `/search` link does not carry guests.** Restrictions live in
+  `sessionStorage`, not the URL, so someone opening your link gets the same
+  query and location but ranked with no restrictions. This was deliberate —
+  a friend's allergy list does not belong in a URL — but it does mean shared
+  links rank differently than what you saw.

@@ -78,6 +78,285 @@ body {
   font-size: 1.05rem;
 }
 
+/* --- Quick search bar ---------------------------------------------------- */
+
+.searchbar {
+  margin: 0 auto;
+}
+
+.searchbar--large {
+  max-width: 720px;
+  margin-bottom: 2rem;
+}
+
+.searchbar--compact {
+  flex: 1;
+  min-width: 0;
+}
+
+.searchbar__row {
+  display: flex;
+  gap: 0.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.35rem 0.35rem 0.35rem 0.9rem;
+  box-shadow: var(--shadow);
+  align-items: center;
+}
+
+.searchbar--large .searchbar__row {
+  padding: 0.5rem 0.5rem 0.5rem 1.15rem;
+}
+
+.searchbar__row:focus-within {
+  border-color: var(--accent);
+}
+
+.searchbar__query,
+.searchbar__location {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: 0.4rem 0;
+  min-width: 0;
+}
+
+.searchbar--large .searchbar__query {
+  font-size: 1.05rem;
+}
+
+.searchbar__query {
+  flex: 2;
+}
+
+.searchbar__location {
+  flex: 1;
+  border-left: 1px solid var(--border);
+  padding-left: 0.75rem;
+}
+
+.searchbar__query:focus,
+.searchbar__location:focus {
+  outline: none;
+}
+
+.searchbar__locate {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  padding: 0.25rem 0.4rem;
+  border-radius: 999px;
+  line-height: 1;
+}
+
+.searchbar__locate:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.searchbar__submit {
+  width: auto;
+  border-radius: 999px;
+  padding: 0.5rem 1.2rem;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.searchbar__examples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+  justify-content: center;
+}
+
+.searchbar__examplesLabel {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.searchbar__example {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 0.2rem 0.7rem;
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.searchbar__example:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 640px) {
+  .searchbar__row {
+    flex-wrap: wrap;
+    border-radius: var(--radius);
+    padding: 0.6rem;
+  }
+
+  .searchbar__query,
+  .searchbar__location {
+    flex: 1 1 100%;
+    border-left: none;
+    padding-left: 0;
+  }
+
+  .searchbar__location {
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+  }
+
+  .searchbar__submit {
+    flex: 1;
+  }
+}
+
+/* --- Divider ------------------------------------------------------------- */
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  margin: 0 auto 1.75rem;
+  max-width: 720px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+/* --- Results page -------------------------------------------------------- */
+
+.resultsHeader {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.resultsHeader__brand {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: none;
+  letter-spacing: -0.02em;
+}
+
+.resultsPage {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+.resultsPage__meta {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0.9rem;
+}
+
+.resultsPage__title {
+  margin: 0;
+  font-size: 1.45rem;
+  letter-spacing: -0.02em;
+}
+
+.resultsPage__subtitle {
+  margin: 0.3rem 0 0;
+  font-size: 0.87rem;
+  color: var(--text-muted);
+}
+
+.resultsPage__subtitle a {
+  color: var(--accent);
+}
+
+/* --- Loading skeletons --------------------------------------------------- */
+
+.skeletonList {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.skeleton {
+  height: 132px;
+  border-radius: var(--radius);
+  background: linear-gradient(
+    90deg,
+    var(--surface) 25%,
+    var(--surface-alt) 50%,
+    var(--surface) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border: 1px solid var(--border);
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* --- Home pitch panel ---------------------------------------------------- */
+
+.layout--home {
+  align-items: start;
+}
+
+.pitch {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+}
+
+.pitch__title {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+}
+
+.pitch__list {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.87rem;
+  color: var(--text-muted);
+}
+
+.pitch__list li + li {
+  margin-top: 0.7rem;
+}
+
+.pitch__list strong {
+  color: var(--text);
+}
+
 /* --- Layout -------------------------------------------------------------- */
 
 .layout {

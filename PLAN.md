@@ -26,6 +26,8 @@ return the **top 5 nearby restaurants where everyone can actually eat**.
 | Location | Geolocation first, typed ZIP fallback | Fastest common path, with an override that always works |
 | Backend | Python + FastAPI | Async, auto-generated `/docs`, matches existing project conventions |
 | Frontend | React + Vite + TypeScript | Type-safe wire contracts against the Pydantic schemas |
+| Navigation | react-router-dom | Real URLs so results are shareable and Back works |
+| Quick search | Optional `query` on the existing endpoint | Text Search vs Nearby Search, one code path, same cost |
 
 ### Data source research
 
@@ -116,6 +118,36 @@ score = 0.55 * group_fit
       + 0.10 * cuisine_preference
       + 0.05 * price_fit
 ```
+
+---
+
+## Two ways in
+
+Not everyone arrives with a fully specified party. The app supports both
+entry points, and they converge on the same ranking engine:
+
+1. **Quick search** — type "sushi" or "vegan brunch", get ranked results
+   immediately. No guest setup required.
+2. **Group planner** — add each friend and their restrictions for the full
+   group-fit ranking.
+
+These are **not** separate features internally. `SearchRequest` carries an
+optional `query`; when present the backend calls Places Text Search, otherwise
+Nearby Search. Everything after that — normalization, scoring, explanation —
+is identical. Adding quick search cost one field and one branch, not a second
+pipeline.
+
+If guests are already set, a quick search still ranks by group fit. The
+results screen states which mode produced the ranking, so the user is never
+guessing whether restrictions were applied.
+
+### What lives in the URL
+
+Location, radius, price, and query go in the query string, so results are
+shareable, bookmarkable, and survive a refresh. **Guests deliberately do not.**
+A friend's allergy list should not be pasted into a group chat as a URL, so it
+lives in `sessionStorage` instead. The tradeoff is that a shared link ranks
+without restrictions — documented in `BUILD.md` rather than hidden.
 
 ---
 

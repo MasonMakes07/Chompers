@@ -20,6 +20,7 @@ export interface GuestDraft {
 }
 
 export interface SearchRequest {
+  query?: string;
   guest_count: number;
   guests: { name: string; restrictions: RestrictionId[] }[];
   latitude?: number;
@@ -67,7 +68,13 @@ export interface RestaurantResult {
 export interface SearchResponse {
   results: RestaurantResult[];
   searched_location: string;
+  query: string | null;
   candidates_considered: number;
   excluded_count: number;
   notes: string[];
+}
+
+export interface Coordinates {
+  latitude: number;
+  longitude: number;
 }

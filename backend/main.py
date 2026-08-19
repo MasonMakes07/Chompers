@@ -89,10 +89,17 @@ async def search(payload: SearchRequest) -> SearchResponse:
 
     latitude, longitude, location_label = await _resolve_location(payload)
 
+    # A free-text query routes to Text Search; otherwise plain Nearby Search.
+    # Both cost exactly one API call.
     try:
-        candidates = await places_client.search_nearby(
-            latitude, longitude, payload.radius_meters
-        )
+        if payload.query:
+            candidates = await places_client.search_text(
+                payload.query, latitude, longitude, payload.radius_meters
+            )
+        else:
+            candidates = await places_client.search_nearby(
+                latitude, longitude, payload.radius_meters
+            )
     except PlacesError as error:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)
@@ -106,4 +113,5 @@ async def search(payload: SearchRequest) -> SearchResponse:
         searched_location=location_label,
         candidates_considered=len(candidates),
         excluded_count=excluded_count,
+        query=payload.query,
     )
