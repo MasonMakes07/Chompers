@@ -58,10 +58,33 @@ async def health() -> dict[str, object]:
     }
 
 
+# Names the coordinates the browser reported, for display in the UI.
+@app.get("/api/reverse-geocode")
+async def reverse_geocode(latitude: float, longitude: float) -> dict[str, object]:
+    if not -90.0 <= latitude <= 90.0 or not -180.0 <= longitude <= 180.0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Coordinates are out of range.",
+        )
+    try:
+        return {"label": await geocoder.reverse(latitude, longitude)}
+    except GeocodingError as error:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)
+        ) from error
+
+
 # Resolves the search origin from coordinates or a typed city/ZIP.
 async def _resolve_location(payload: SearchRequest) -> tuple[float, float, str]:
     if payload.latitude is not None and payload.longitude is not None:
-        return payload.latitude, payload.longitude, "your current location"
+        # Name the spot so results read "near La Jolla" rather than "near
+        # your current location". A failed lookup must not fail the search.
+        try:
+            label = await geocoder.reverse(payload.latitude, payload.longitude)
+        except GeocodingError:
+            label = "your current location"
+        return payload.latitude, payload.longitude, label
+
     try:
         return await geocoder.resolve(payload.location_query or "")
     except GeocodingError as error:

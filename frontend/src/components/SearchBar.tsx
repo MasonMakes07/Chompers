@@ -15,7 +15,8 @@ export function SearchBar({
   initialLocation = "",
   onSearch,
 }: SearchBarProps) {
-  const { coordinates, setCoordinates } = useParty();
+  const { coordinates, setCoordinates, locationLabel, isNamingLocation } =
+    useParty();
   const [query, setQuery] = useState(initialQuery);
   const [locationQuery, setLocationQuery] = useState(initialLocation);
   const [isLocating, setIsLocating] = useState(false);
@@ -32,6 +33,14 @@ export function SearchBar({
       setLocationQuery("");
     }
   };
+
+  // Names the current location in the placeholder so the user can see where
+  // a coordinate-based search will actually run.
+  const locationPlaceholder = !coordinates
+    ? "City or ZIP"
+    : isNamingLocation
+      ? "Finding you…"
+      : (locationLabel ?? "Near you");
 
   // Submits the search, letting the parent decide where to navigate.
   const submit = (event: React.FormEvent) => {
@@ -75,8 +84,9 @@ export function SearchBar({
           type="text"
           className="searchbar__location"
           maxLength={120}
-          placeholder={coordinates ? "Near you" : "City or ZIP"}
+          placeholder={locationPlaceholder}
           aria-label="Location"
+          title={locationLabel ?? undefined}
           value={locationQuery}
           onChange={(event) => {
             setLocationQuery(event.target.value);

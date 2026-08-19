@@ -10,18 +10,24 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
+import { reverseGeocode } from "../api/client";
 import type { Coordinates, GuestDraft } from "../types";
 
 const GUESTS_STORAGE_KEY = "chompers.guests";
 const COORDS_STORAGE_KEY = "chompers.coords";
+const LABEL_STORAGE_KEY = "chompers.coordsLabel";
 
 interface PartyContextValue {
   guestCount: number;
   guests: GuestDraft[];
   coordinates: Coordinates | null;
+  /** Human-readable name for `coordinates`, or null while it resolves. */
+  locationLabel: string | null;
+  isNamingLocation: boolean;
   setGuestCount: (count: number) => void;
   setGuests: (guests: GuestDraft[]) => void;
   setCoordinates: (coordinates: Coordinates | null) => void;
@@ -55,6 +61,10 @@ export function PartyProvider({ children }: { children: ReactNode }) {
   const [coordinates, setCoordinatesState] = useState<Coordinates | null>(() =>
     readStored<Coordinates | null>(COORDS_STORAGE_KEY, null)
   );
+  const [locationLabel, setLocationLabel] = useState<string | null>(() =>
+    readStored<string | null>(LABEL_STORAGE_KEY, null)
+  );
+  const [isNamingLocation, setIsNamingLocation] = useState(false);
   const [guestCount, setGuestCount] = useState(4);
 
   useEffect(() => {
@@ -65,27 +75,75 @@ export function PartyProvider({ children }: { children: ReactNode }) {
     writeStored(COORDS_STORAGE_KEY, coordinates);
   }, [coordinates]);
 
+  useEffect(() => {
+    writeStored(LABEL_STORAGE_KEY, locationLabel);
+  }, [locationLabel]);
+
+  // Coordinates already looked up, so StrictMode's double-invoked effect
+  // does not fire a second identical request.
+  const namedCoordsRef = useRef<string | null>(null);
+
+  // Names the coordinates whenever they change, so the UI can show where
+  // "my location" actually is instead of an unhelpful generic phrase.
+  useEffect(() => {
+    if (coordinates === null) {
+      namedCoordsRef.current = null;
+      setLocationLabel(null);
+      return;
+    }
+
+    const coordsKey = `${coordinates.latitude},${coordinates.longitude}`;
+    if (namedCoordsRef.current === coordsKey) return;
+    namedCoordsRef.current = coordsKey;
+
+    let isCurrent = true;
+    setIsNamingLocation(true);
+
+    void reverseGeocode(coordinates.latitude, coordinates.longitude).then(
+      (label) => {
+        if (!isCurrent) return;
+        setLocationLabel(label);
+        setIsNamingLocation(false);
+      }
+    );
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [coordinates]);
+
   // Stores the guest list and keeps headcount at least as large as it.
   const setGuests = useCallback((nextGuests: GuestDraft[]) => {
     setGuestsState(nextGuests);
     setGuestCount((currentCount) => Math.max(currentCount, nextGuests.length));
   }, []);
 
-  const setCoordinates = useCallback(
-    (next: Coordinates | null) => setCoordinatesState(next),
-    []
-  );
+  // Replaces the coordinates, clearing any stale label for the old spot.
+  const setCoordinates = useCallback((next: Coordinates | null) => {
+    setCoordinatesState(next);
+    setLocationLabel(null);
+  }, []);
 
   const value = useMemo(
     () => ({
       guestCount,
       guests,
       coordinates,
+      locationLabel,
+      isNamingLocation,
       setGuestCount,
       setGuests,
       setCoordinates,
     }),
-    [guestCount, guests, coordinates, setGuests, setCoordinates]
+    [
+      guestCount,
+      guests,
+      coordinates,
+      locationLabel,
+      isNamingLocation,
+      setGuests,
+      setCoordinates,
+    ]
   );
 
   return <PartyContext.Provider value={value}>{children}</PartyContext.Provider>;

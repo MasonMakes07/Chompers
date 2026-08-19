@@ -52,6 +52,24 @@ async function readErrorMessage(response: Response): Promise<string> {
   return `Search failed (${response.status}).`;
 }
 
+// Names a coordinate pair, e.g. "La Jolla, San Diego, CA", or null on failure.
+export async function reverseGeocode(
+  latitude: number,
+  longitude: number
+): Promise<string | null> {
+  try {
+    const response = await fetch(
+      `/api/reverse-geocode?latitude=${latitude}&longitude=${longitude}`
+    );
+    if (!response.ok) return null;
+    const body = (await response.json()) as { label?: string };
+    return body.label ?? null;
+  } catch {
+    // A missing label is cosmetic, never worth surfacing as an error.
+    return null;
+  }
+}
+
 // Asks the browser for coordinates, resolving to null if unavailable.
 export function requestBrowserLocation(): Promise<
   { latitude: number; longitude: number } | null

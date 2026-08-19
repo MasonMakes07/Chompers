@@ -27,6 +27,14 @@ export function SearchResultsPage() {
   // The URL is the single source of truth, so a refresh reruns the search.
   const paramsKey = searchParams.toString();
 
+  // The party is NOT in the URL, so changing a restriction and searching
+  // again can produce an identical path. Without this key the effect would
+  // not re-run and the page would show results for the old restrictions.
+  const partyKey = JSON.stringify([
+    guestCount,
+    guests.map((guest) => [guest.name.trim(), [...guest.restrictions].sort()]),
+  ]);
+
   useEffect(() => {
     const state = parseSearchParams(new URLSearchParams(paramsKey));
     const searchCoordinates = state.coordinates ?? coordinates;
@@ -81,7 +89,7 @@ export function SearchResultsPage() {
       isCurrent = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paramsKey]);
+  }, [paramsKey, partyKey]);
 
   const state = parseSearchParams(searchParams);
 

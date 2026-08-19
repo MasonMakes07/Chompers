@@ -7,6 +7,7 @@ from backend.models.guest import Guest, Restriction
 from backend.models.party import Party
 from backend.models.restaurant import Restaurant
 from backend.services import osm_tags
+from backend.services.geocoder import Geocoder
 from backend.services.places_client import PlacesClient
 
 BASE_LAT, BASE_LNG = 32.8801, -117.2340
@@ -211,6 +212,76 @@ def test_nearby_query_is_bounded():
     assert query.startswith("[out:json]")
     assert f"around:5000,{BASE_LAT},{BASE_LNG}" in query
     assert query.rstrip().endswith(";")
+
+
+# ---------------------------------------------------------------------------
+# Reverse geocoding labels
+# ---------------------------------------------------------------------------
+
+
+# A full address must render as neighborhood, city, state.
+def test_reverse_label_prefers_neighborhood_city_state():
+    label = Geocoder._label_from_address(
+        {
+            "neighbourhood": "La Jolla",
+            "city": "San Diego",
+            "ISO3166-2-lvl4": "US-CA",
+        },
+        "",
+    )
+
+    assert label == "La Jolla, San Diego, CA"
+
+
+# A missing neighborhood must simply drop that line, not leave a gap.
+def test_reverse_label_without_neighborhood():
+    label = Geocoder._label_from_address(
+        {"city": "Portland", "ISO3166-2-lvl4": "US-OR"}, ""
+    )
+
+    assert label == "Portland, OR"
+
+
+# Towns and villages must stand in when there is no city key.
+def test_reverse_label_falls_back_through_city_keys():
+    label = Geocoder._label_from_address(
+        {"village": "Cambria", "ISO3166-2-lvl4": "US-CA"}, ""
+    )
+
+    assert label == "Cambria, CA"
+
+
+# A duplicated name must not be repeated in the label.
+def test_reverse_label_deduplicates_parts():
+    label = Geocoder._label_from_address(
+        {"neighbourhood": "Brooklyn", "city": "Brooklyn", "state": "New York"}, ""
+    )
+
+    assert label == "Brooklyn, New York"
+
+
+# Outside the US there is no ISO subdivision code, so use the state name.
+def test_reverse_label_uses_state_name_without_iso_code():
+    label = Geocoder._label_from_address(
+        {"city": "Kyoto", "state": "Kyoto Prefecture"}, ""
+    )
+
+    assert label == "Kyoto, Kyoto Prefecture"
+
+
+# An address with nothing usable must fall back to the display name.
+def test_reverse_label_falls_back_to_display_name():
+    label = Geocoder._label_from_address(
+        {}, "Some Road, Some County, Some Region, 12345, Country"
+    )
+
+    assert label != ""
+    assert "Some Road" in label
+
+
+# With no address and no display name at all, the label must still be safe.
+def test_reverse_label_never_returns_empty():
+    assert Geocoder._label_from_address({}, "") == "your location"
 
 
 # ---------------------------------------------------------------------------

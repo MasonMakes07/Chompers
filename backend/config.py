@@ -43,8 +43,11 @@ class Settings:
         self.allowed_origins = self._parse_origins(
             os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
         )
+        # A single user action can cost more than one request (naming the
+        # location, then searching), and React StrictMode doubles effects in
+        # development, so this has room above the one-per-search baseline.
         self.rate_limit_per_minute = self._parse_int(
-            os.getenv("RATE_LIMIT_PER_MINUTE"), default=10, minimum=1
+            os.getenv("RATE_LIMIT_PER_MINUTE"), default=30, minimum=1
         )
         self.cache_ttl_seconds = self._parse_int(
             os.getenv("CACHE_TTL_SECONDS"), default=900, minimum=0

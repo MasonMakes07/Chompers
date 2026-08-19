@@ -1,7 +1,8 @@
 """Security middleware.
 
-Rate limiting here protects the Google quota as much as the server: an
-unthrottled endpoint is the one realistic way this app could cost money.
+Rate limiting protects the upstream services more than this server. Overpass
+and Nominatim are free volunteer projects, so a runaway client must be capped
+here before it becomes their problem.
 """
 
 import time
@@ -14,6 +15,19 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from .config import get_settings
 
 RATE_LIMIT_WINDOW_SECONDS = 60
+
+# Cheap local endpoints that never touch an upstream service and so are not
+# worth spending a client's search budget on.
+RATE_LIMIT_EXEMPT_PATHS = frozenset({"/api/health", "/docs", "/openapi.json"})
+
+# Request timestamps per client IP. Module level rather than per-instance so
+# the counter survives app reloads and can be cleared between tests.
+_HITS: dict[str, deque[float]] = defaultdict(deque)
+
+
+# Clears all rate-limit state. Used by tests; never called in production.
+def reset_rate_limits() -> None:
+    _HITS.clear()
 
 # Headers applied to every response to harden the browser side.
 SECURITY_HEADERS = {
@@ -31,11 +45,10 @@ SECURITY_HEADERS = {
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Caps requests per client IP inside a rolling one-minute window."""
 
-    # Prepares per-IP request timestamp queues.
+    # Prepares the middleware with the configured per-minute allowance.
     def __init__(self, app) -> None:
         super().__init__(app)
         self._settings = get_settings()
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
 
     # Identifies the client, trusting the socket address over any header.
     @staticmethod
@@ -46,10 +59,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method == "OPTIONS":
             return await call_next(request)
+        if request.url.path in RATE_LIMIT_EXEMPT_PATHS:
+            return await call_next(request)
 
         client_key = self._client_key(request)
         now = time.monotonic()
-        recent_hits = self._hits[client_key]
+        recent_hits = _HITS[client_key]
 
         while recent_hits and now - recent_hits[0] > RATE_LIMIT_WINDOW_SECONDS:
             recent_hits.popleft()

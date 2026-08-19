@@ -84,8 +84,20 @@ def test_search_does_not_require_an_api_key(client, monkeypatch):
     assert response.status_code == 200
 
 
-# The rate limiter must eventually reject a flood from one client.
+# The rate limiter must eventually reject a flood of upstream-hitting calls.
 def test_rate_limit_blocks_a_flood(client):
-    statuses = [client.get("/api/health").status_code for _ in range(40)]
+    # Invalid coordinates still count: the limiter runs before routing, so a
+    # flood cannot dodge the cap by being malformed.
+    statuses = [
+        client.get("/api/reverse-geocode?latitude=999&longitude=0").status_code
+        for _ in range(60)
+    ]
 
-    assert 429 in statuses, "Rate limiting must protect the Google quota."
+    assert 429 in statuses, "A flood must be capped before it reaches upstream."
+
+
+# Health must stay exempt, so monitoring never consumes a user's budget.
+def test_health_is_exempt_from_rate_limiting(client):
+    statuses = [client.get("/api/health").status_code for _ in range(60)]
+
+    assert set(statuses) == {200}

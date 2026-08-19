@@ -17,7 +17,14 @@ import httpx
 from ..config import get_settings
 
 GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
+REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 REQUEST_TIMEOUT_SECONDS = 10.0
+
+# Address keys to try for the neighborhood line, most specific first.
+LOCALITY_KEYS = ("neighbourhood", "suburb", "quarter", "city_district")
+
+# Address keys to try for the town line, most specific first.
+CITY_KEYS = ("city", "town", "village", "municipality", "county")
 
 # Nominatim's usage policy allows at most one request per second, absolute.
 _REQUEST_LOCK = asyncio.Lock()
@@ -38,10 +45,11 @@ class GeocodingError(RuntimeError):
 class Geocoder:
     """Resolves free-text locations into latitude/longitude pairs."""
 
-    # Prepares the geocoder with settings and a small permanent cache.
+    # Prepares the geocoder with settings and small permanent caches.
     def __init__(self) -> None:
         self._settings = get_settings()
         self._cache: dict[str, tuple[float, float, str]] = {}
+        self._reverse_cache: dict[tuple[float, float], str] = {}
 
     # Resolves a place name or ZIP to (latitude, longitude, display name).
     async def resolve(self, query: str) -> tuple[float, float, str]:
@@ -70,16 +78,69 @@ class Geocoder:
         self._cache[normalized_query] = resolved
         return resolved
 
-    # Sends one paced, identified request to Nominatim and returns the JSON.
-    async def _request(self, address: str) -> list[dict]:
-        global _last_request_at
+    # Names the place at a coordinate, e.g. "La Jolla, San Diego, CA".
+    async def reverse(self, latitude: float, longitude: float) -> str:
+        # Rounding to ~100m means small GPS jitter reuses one cache entry.
+        cache_key = (round(latitude, 3), round(longitude, 3))
+        if cache_key in self._reverse_cache:
+            return self._reverse_cache[cache_key]
 
+        params = {
+            "lat": f"{latitude:.6f}",
+            "lon": f"{longitude:.6f}",
+            "format": "jsonv2",
+            "zoom": "14",
+            "addressdetails": "1",
+        }
+        body = await self._get(REVERSE_URL, params)
+        if not isinstance(body, dict) or "address" not in body:
+            raise GeocodingError("Could not name that location.")
+
+        label = self._label_from_address(
+            body["address"], body.get("display_name", "")
+        )
+        self._reverse_cache[cache_key] = label
+        return label
+
+    # Builds a short, readable place label from Nominatim's address parts.
+    @staticmethod
+    def _label_from_address(address: dict, display_name: str) -> str:
+        # Prefer neighborhood + city + state; each line is optional.
+        locality = next(
+            (address[key] for key in LOCALITY_KEYS if address.get(key)), None
+        )
+        city = next((address[key] for key in CITY_KEYS if address.get(key)), None)
+
+        # "US-CA" -> "CA" gives a compact state without a lookup table.
+        state_code = address.get("ISO3166-2-lvl4", "")
+        state = (
+            state_code.split("-")[-1] if "-" in state_code else address.get("state")
+        )
+
+        parts: list[str] = []
+        for part in (locality, city, state):
+            if part and part not in parts:
+                parts.append(part)
+
+        if parts:
+            return ", ".join(parts)
+        return Geocoder._shorten(display_name) if display_name else "your location"
+
+    # Looks up an address, returning Nominatim's ranked list of matches.
+    async def _request(self, address: str) -> list[dict]:
         params = {
             "q": address,
             "format": "jsonv2",
             "limit": "1",
             "addressdetails": "0",
         }
+        body = await self._get(GEOCODE_URL, params)
+        return body if isinstance(body, list) else []
+
+    # Sends one paced, identified request to Nominatim and returns the JSON.
+    async def _get(self, url: str, params: dict[str, str]):
+        global _last_request_at
+
         headers = {"User-Agent": self._settings.user_agent}
 
         async with _REQUEST_LOCK:
@@ -92,7 +153,7 @@ class Geocoder:
                     timeout=REQUEST_TIMEOUT_SECONDS
                 ) as client:
                     response = await client.get(
-                        GEOCODE_URL, params=params, headers=headers
+                        url, params=params, headers=headers
                     )
             except httpx.RequestError as error:
                 raise GeocodingError(
@@ -109,11 +170,11 @@ class Geocoder:
             raise GeocodingError(f"Geocoding failed ({response.status_code}).")
 
         try:
-            body = response.json()
+            return response.json()
         except ValueError as error:
-            raise GeocodingError("The geocoder returned an unreadable reply.") from error
-
-        return body if isinstance(body, list) else []
+            raise GeocodingError(
+                "The geocoder returned an unreadable reply."
+            ) from error
 
     # Trims Nominatim's very long display names down to something readable.
     @staticmethod

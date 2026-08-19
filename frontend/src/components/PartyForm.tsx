@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { GuestRow } from "./GuestRow";
 import { requestBrowserLocation } from "../api/client";
+import { useParty } from "../context/PartyContext";
 import type { Coordinates, GuestDraft } from "../types";
 
 const MAX_GUESTS = 20;
@@ -50,6 +51,7 @@ export function PartyForm(props: PartyFormProps) {
     onSubmit,
   } = props;
 
+  const { locationLabel, isNamingLocation } = useParty();
   const [isLocating, setIsLocating] = useState(false);
   const [locateFailed, setLocateFailed] = useState(false);
 
@@ -209,7 +211,17 @@ export function PartyForm(props: PartyFormProps) {
 
       {coordinates && (
         <p className="status-line status-line--ok">
-          Using your current location.
+          {isNamingLocation ? (
+            "Finding your location…"
+          ) : locationLabel ? (
+            <>
+              Searching near <strong>{locationLabel}</strong>
+            </>
+          ) : (
+            // The name lookup failed, so show coordinates rather than an
+            // empty reassurance the user cannot verify.
+            `Using your location (${coordinates.latitude.toFixed(3)}, ${coordinates.longitude.toFixed(3)})`
+          )}
         </p>
       )}
       {locateFailed && (
