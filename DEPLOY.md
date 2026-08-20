@@ -63,9 +63,12 @@ zero-config. Three failure modes this avoids, all hit during the first deploys:
    the app, so FastAPI sees `/api/index` and 404s every real route. The legacy
    `routes` entry preserves the original path.
 3. **Frontend 404 / `index.html` errors** — when Vercel classifies the repo as a
-   "backend framework project", static requests get funneled into Python. The
-   `{ "handle": "filesystem" }` route serves real files first, then the SPA
-   fallback sends client-side routes to `index.html`.
+   "backend framework project", static requests get funneled into Python.
+4. **Vercel's own `404: NOT_FOUND`** (not FastAPI's JSON) — `@vercel/static-build`
+   mounts its output **under the source directory**, so the built files live at
+   `/frontend/index.html` and `/frontend/assets/*`, not at the root. Every static
+   route must therefore carry the `/frontend` prefix. The built `index.html` links
+   assets as `/assets/...`, so that path is mapped explicitly too.
 
 Keep Python deps in `api/requirements.txt` (next to the function), and leave the
 dashboard's **Build Command / Output Directory blank** — `builds` takes precedence

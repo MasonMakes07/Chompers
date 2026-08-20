@@ -13,7 +13,8 @@
   ],
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/index.py" },
-    { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/index.html" }
+    { "src": "/assets/(.*)", "dest": "/frontend/assets/$1" },
+    { "src": "/(.*\\.[A-Za-z0-9]+)", "dest": "/frontend/$1" },
+    { "src": "/(.*)", "dest": "/frontend/index.html" }
   ]
 }
