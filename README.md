@@ -25,24 +25,30 @@ sick". Thai food scores well for vegetarians and badly for nut allergies.
 
 - **[PLAN.md](PLAN.md)** — the design and the reasoning behind it
 - **[BUILD.md](BUILD.md)** — what was built, what is verified, what is not
+- **[DEPLOY.md](DEPLOY.md)** — deploying to Vercel (private, Google provider)
 
 ## Stack
 
-Python + FastAPI backend, React + Vite + TypeScript frontend, and
-**OpenStreetMap** (Overpass + Nominatim) for restaurant data.
+Python + FastAPI backend, React + Vite + TypeScript frontend. Restaurant data comes
+from **Google Places** (ratings + prices; needs a key) or **OpenStreetMap** (Overpass
++ Nominatim; keyless fallback), selected by `PLACES_PROVIDER`.
 
 ## Setup
 
-**No API key. No billing account. No signup.** Clone and run:
+Runs **keyless out of the box** — with no key it falls back to OpenStreetMap. Clone
+and run:
 
 ```bash
-python -m pip install -r backend/requirements.txt
+python -m pip install -r requirements-dev.txt
 python -m uvicorn backend.main:app --reload
 
 cd frontend && npm install && npm run dev
 ```
 
 Open `http://localhost:5173`.
+
+To use **Google Places** instead (ratings, price levels, faster), copy
+`.env.example` to `.env`, add `GOOGLE_MAPS_API_KEY`, and set `PLACES_PROVIDER=google`.
 
 ## Cost
 

@@ -110,9 +110,15 @@ class Settings:
         )
         # Where cached Overpass responses live between runs. Without this the
         # cache dies on every reload, which in development is every edit.
-        self.cache_dir = os.getenv(
-            "CACHE_DIR", os.path.join(_PROJECT_ROOT, ".cache", "places")
-        ).strip()
+        # Vercel's filesystem is read-only except for /tmp, so default the cache
+        # there when running on Vercel (it sets the VERCEL env var). Local runs
+        # keep the project-root cache, which survives reloads.
+        default_cache_dir = (
+            "/tmp/chompers-cache"
+            if os.getenv("VERCEL")
+            else os.path.join(_PROJECT_ROOT, ".cache", "places")
+        )
+        self.cache_dir = os.getenv("CACHE_DIR", default_cache_dir).strip()
         self.cache_ttl_seconds = self._parse_int(
             # OpenStreetMap is volunteer-edited: restaurants appear and close
             # on a scale of days, not minutes. A 15-minute TTL threw away

@@ -1,0 +1,6 @@
+# Runtime dependencies (installed by Vercel for the /api function).
+# Pinned for reproducible builds. Dev/test extras live in requirements-dev.txt.
+fastapi==0.141.1
+httpx==0.28.1
+pydantic==2.13.4
+python-dotenv==1.2.2
