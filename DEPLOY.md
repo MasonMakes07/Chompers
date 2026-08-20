@@ -49,14 +49,27 @@ in, invite them to the project.
 
 - Open the deployment URL (logged into Vercel) → the app loads.
 - `https://<your-app>.vercel.app/api/health` → `{"provider": "google", ...}`.
-  - If this returns `{"detail":"Not Found"}`, the request reached FastAPI but the
-    path was wrong. The backend lives at `api/[...path].py` — a **catch-all**, so
-    Vercel preserves the real path. Do **not** rename it to `index.py` and do
-    **not** add an `/api/(.*)` rewrite: rewrite destinations are fixed strings that
-    discard the path, so every route would 404.
-  - If the **frontend** 404s, check that no `requirements.txt` has reappeared at the
-    repo root — that makes Vercel treat the project as a backend framework and route
-    static requests into Python. Python deps belong in `api/requirements.txt`.
+
+### Routing: why `vercel.json` looks the way it does
+
+`vercel.json` deliberately uses a **`builds` + `routes`** block rather than modern
+zero-config. Three failure modes this avoids, all hit during the first deploys:
+
+1. **`No FastAPI entrypoint found in default locations`** — Vercel's FastAPI
+   auto-detector scans the repo for an `app` variable, finds several (including one
+   in `backend/tests/`), and fails the build. A `builds` block disables detection.
+2. **`{"detail":"Not Found"}` from FastAPI** — a modern
+   `rewrites` entry like `/api/(.*)` → `/api/index` passes the **rewritten** path to
+   the app, so FastAPI sees `/api/index` and 404s every real route. The legacy
+   `routes` entry preserves the original path.
+3. **Frontend 404 / `index.html` errors** — when Vercel classifies the repo as a
+   "backend framework project", static requests get funneled into Python. The
+   `{ "handle": "filesystem" }` route serves real files first, then the SPA
+   fallback sends client-side routes to `index.html`.
+
+Keep Python deps in `api/requirements.txt` (next to the function), and leave the
+dashboard's **Build Command / Output Directory blank** — `builds` takes precedence
+and dashboard overrides can conflict with it.
 - Run a search; try a misspelled city like `San Fransisco CA` → resolves to
   California (confirms both Google APIs work).
 - Open the URL in a **private/incognito window** (logged out) → you should hit the

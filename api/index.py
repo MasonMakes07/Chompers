@@ -1,9 +1,11 @@
 """Vercel serverless entry point for the FastAPI backend.
 
-Named as a catch-all (`[...path].py`) so Vercel's filesystem routing sends every
-`/api/*` request here **with the original path intact**. A plain `index.py` plus a
-`vercel.json` rewrite does not work: the rewrite destination is a fixed string, so
-FastAPI would receive `/api/index` and 404 on every real route.
+`vercel.json` uses an explicit `builds` block, which disables Vercel's zero-config
+framework auto-detection. That matters: the auto-detector scans the repo for a
+FastAPI `app` variable, finds several (including one in the test suite), and fails
+the build with "No FastAPI entrypoint found in default locations". Declaring the
+build explicitly removes that guesswork, and the legacy `routes` entry hands this
+function the original request path so `/api/health` reaches its route.
 
 The repo root is added to `sys.path` so `backend` imports resolve when Vercel runs
 this file from `api/`.
