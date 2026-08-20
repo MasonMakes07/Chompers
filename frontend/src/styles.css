@@ -204,6 +204,13 @@ select {
   color: #4c6153;
 }
 
+.hero__art {
+  display: block;
+  width: clamp(140px, 24vw, 190px);
+  height: auto;
+  margin: 0 auto 0.4rem;
+}
+
 /* --- Layout -------------------------------------------------------------- */
 
 .layout {
@@ -487,6 +494,37 @@ select {
   border-color: var(--rose);
 }
 
+/* Cuisine header sits with the cuisine chips as one section below the divider. */
+.chip-group__hint {
+  width: 100%;
+  margin: 0.85rem 0 0;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
+.chip-group--tight {
+  margin-top: 0.4rem;
+  padding-top: 0;
+  border-top: none;
+}
+
+/* Liked cuisine: a soft positive fill; avoided: muted and struck through. */
+.chip--like {
+  background: var(--forest-soft);
+  border-color: var(--forest);
+  color: #3f5a45;
+  font-weight: 500;
+}
+
+.chip--avoid {
+  background: var(--surface-raised);
+  border-color: var(--border-strong);
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
 .empty-note {
   background: var(--forest-soft);
   border-radius: var(--radius-sm);
@@ -693,6 +731,93 @@ select {
   color: var(--text-muted);
 }
 
+/* --- Results toolbar (client-side sort/filter) --------------------------- */
+
+.results-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin: 1.25rem 0 0.25rem;
+}
+
+.results-toolbar__sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.results-toolbar__sort select {
+  appearance: none;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.82rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.toolbar-toggle {
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.toolbar-toggle--on {
+  background: var(--forest);
+  border-color: var(--forest);
+  color: #fff;
+  font-weight: 500;
+}
+
+/* --- Empty state --------------------------------------------------------- */
+
+.empty-state {
+  text-align: center;
+  padding: 2.5rem 1.25rem;
+}
+
+.empty-state__icon {
+  font-size: 2.4rem;
+  line-height: 1;
+}
+
+.empty-state__title {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.empty-state__body {
+  margin: 0 0 1.25rem;
+  color: var(--text-muted);
+}
+
+.empty-state__cta {
+  display: inline-block;
+  background: var(--forest);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: none;
+  border-radius: var(--radius);
+  padding: 0.7rem 1.4rem;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.empty-state__cta:hover {
+  background: var(--forest-hover);
+}
+
 .browse-note {
   margin: 1rem 0 0;
   font-size: 0.86rem;
@@ -885,6 +1010,33 @@ select {
   font-weight: 600;
 }
 
+/* Positive dietary chips: what this place is confidently good for. Verified
+   (explicit listing data) reads stronger than a cuisine-inferred guess. */
+.diet-highlights {
+  list-style: none;
+  margin: 0.65rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.diet-chip {
+  font-size: 0.76rem;
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+  background: var(--surface);
+  border: 1px solid var(--forest);
+  color: var(--forest);
+}
+
+.diet-chip--verified {
+  background: var(--forest-soft);
+  border-color: transparent;
+  color: #3f5a45;
+  font-weight: 600;
+}
+
 /* --- States -------------------------------------------------------------- */
 
 .alert {
@@ -899,6 +1051,12 @@ select {
   background: #f8e7e2;
   border-color: #eccfc7;
   color: #97503f;
+}
+
+.alert--retry {
+  background: #fbf1d9;
+  border-color: #ecdcb0;
+  color: #806718;
 }
 
 .skeleton-list {

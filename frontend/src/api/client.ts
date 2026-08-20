@@ -7,6 +7,18 @@ import type { SearchRequest, SearchResponse } from "../types";
 // answered, which surfaces as a "timeout" that was never really one.
 const REQUEST_TIMEOUT_MS = 45000;
 
+// Thrown on a 429 so the caller can show a countdown and auto-retry, rather
+// than treating throttling like an ordinary failure.
+export class RateLimitError extends Error {
+  readonly retryAfterSeconds: number;
+
+  constructor(retryAfterSeconds: number) {
+    super("Too many searches at once.");
+    this.name = "RateLimitError";
+    this.retryAfterSeconds = retryAfterSeconds;
+  }
+}
+
 // Posts a search to the backend and returns ranked results, or throws.
 export async function searchRestaurants(
   payload: SearchRequest
@@ -27,7 +39,10 @@ export async function searchRestaurants(
 
     if (!response.ok) {
       if (response.status === 429) {
-        throw new Error(rateLimitMessage(response));
+        const retryAfter = Number(response.headers.get("Retry-After"));
+        throw new RateLimitError(
+          Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 10
+        );
       }
       throw new Error(await readErrorMessage(response));
     }
@@ -42,16 +57,6 @@ export async function searchRestaurants(
   } finally {
     window.clearTimeout(timeoutId);
   }
-}
-
-// Builds a friendly throttling message, telling the user how long to wait.
-function rateLimitMessage(response: Response): string {
-  const retryAfter = Number(response.headers.get("Retry-After"));
-  const wait =
-    Number.isFinite(retryAfter) && retryAfter > 0
-      ? ` Try again in ${retryAfter} second${retryAfter === 1 ? "" : "s"}.`
-      : " Wait a moment and try again.";
-  return `Too many searches at once.${wait}`;
 }
 
 // Extracts a readable message from a failed backend response.

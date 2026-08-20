@@ -1,10 +1,10 @@
 // Results: a distinct screen driven entirely by the URL query string.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { ResultCard } from "../components/ResultCard";
 import { SearchBar } from "../components/SearchBar";
-import { searchRestaurants } from "../api/client";
+import { RateLimitError, searchRestaurants } from "../api/client";
 import { useParty } from "../context/PartyContext";
 import { buildSearchPath, parseSearchParams } from "../searchParams";
 import { RESTRICTIONS, type SearchResponse } from "../types";
@@ -38,6 +38,13 @@ export function SearchResultsPage() {
   // Ranks beyond the first five are fetched with them and held back, so
   // revealing them costs no network round trip. A second request would be slower.
   const [visibleCount, setVisibleCount] = useState(SHORTLIST_SIZE);
+  // Sort and filter apply client-side to the already-fetched pool, so neither
+  // control ever costs another API call.
+  const [sortBy, setSortBy] = useState<"best" | "rating" | "distance">("best");
+  const [openNowOnly, setOpenNowOnly] = useState(false);
+  // Non-null while a 429 countdown is running; the nonce re-fires the search.
+  const [retrySeconds, setRetrySeconds] = useState<number | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   // The URL is the single source of truth, so a refresh reruns the search.
   const paramsKey = searchParams.toString();
@@ -47,7 +54,12 @@ export function SearchResultsPage() {
   // not re-run and the page would show results for the old restrictions.
   const partyKey = JSON.stringify([
     guestCount,
-    guests.map((guest) => [guest.name.trim(), [...guest.restrictions].sort()]),
+    guests.map((guest) => [
+      guest.name.trim(),
+      [...guest.restrictions].sort(),
+      [...guest.likedCuisines].sort(),
+      [...guest.dislikedCuisines].sort(),
+    ]),
   ]);
 
   // StrictMode double-invokes this effect in dev, firing two fetches. That is
@@ -64,6 +76,7 @@ export function SearchResultsPage() {
     const run = async () => {
       setIsSearching(true);
       setErrorMessage(null);
+      setRetrySeconds(null);
       // A new search starts collapsed again.
       setVisibleCount(SHORTLIST_SIZE);
 
@@ -88,6 +101,8 @@ export function SearchResultsPage() {
             : guests.map((guest) => ({
                 name: guest.name.trim() || "Guest",
                 restrictions: guest.restrictions,
+                liked_cuisines: guest.likedCuisines,
+                disliked_cuisines: guest.dislikedCuisines,
               })),
           limit: isBrowse ? BROWSE_SIZE : RANKED_POOL_SIZE,
           latitude: state.locationQuery
@@ -103,10 +118,16 @@ export function SearchResultsPage() {
         if (isCurrent) setResponse(result);
       } catch (error) {
         if (isCurrent) {
-          setErrorMessage(
-            error instanceof Error ? error.message : "Something went wrong."
-          );
           setResponse(null);
+          // Throttling is recoverable: show a countdown and retry, rather than
+          // surfacing it as a dead-end error the user has to act on.
+          if (error instanceof RateLimitError) {
+            setRetrySeconds(error.retryAfterSeconds);
+          } else {
+            setErrorMessage(
+              error instanceof Error ? error.message : "Something went wrong."
+            );
+          }
         }
       } finally {
         if (isCurrent) setIsSearching(false);
@@ -120,7 +141,22 @@ export function SearchResultsPage() {
       isCurrent = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [paramsKey, partyKey]);
+  }, [paramsKey, partyKey, retryNonce]);
+
+  // Ticks the rate-limit countdown once a second, then re-fires the search by
+  // bumping the retry nonce when it reaches zero.
+  useEffect(() => {
+    if (retrySeconds === null) return;
+    if (retrySeconds <= 0) {
+      setRetrySeconds(null);
+      setRetryNonce((nonce) => nonce + 1);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setRetrySeconds((seconds) => (seconds === null ? null : seconds - 1));
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [retrySeconds]);
 
   const state = parseSearchParams(searchParams);
 
@@ -138,6 +174,24 @@ export function SearchResultsPage() {
     response !== null &&
     response.results.length > 0 &&
     response.results[0].guest_fits.every((fit) => fit.status === "good");
+
+  // Sort/filter the already-fetched pool. "best" keeps the backend's own score
+  // order. Memoized so the once-a-second retry re-render does not re-sort.
+  const processedResults = useMemo(() => {
+    if (response === null) return [];
+    const filtered = openNowOnly
+      ? response.results.filter((result) => result.open_now === true)
+      : response.results;
+    const sorted = [...filtered];
+    if (sortBy === "rating") {
+      sorted.sort((first, second) => (second.rating ?? 0) - (first.rating ?? 0));
+    } else if (sortBy === "distance") {
+      sorted.sort(
+        (first, second) => first.distance_meters - second.distance_meters
+      );
+    }
+    return sorted;
+  }, [response, sortBy, openNowOnly]);
 
   // Re-runs the search from the bar at the top of this page.
   const runSearch = (query: string, locationQuery: string) => {
@@ -177,7 +231,7 @@ export function SearchResultsPage() {
                 // one result a "top 5" is simply untrue.
                 `Your top ${Math.min(
                   visibleCount,
-                  response?.results.length ?? SHORTLIST_SIZE
+                  processedResults.length || SHORTLIST_SIZE
                 )}`}
           </h1>
           {everyoneFits && (
@@ -227,6 +281,16 @@ export function SearchResultsPage() {
           </div>
         )}
 
+        {retrySeconds !== null && (
+          <div
+            className="alert alert--retry"
+            role="status"
+            style={{ marginTop: "1.5rem" }}
+          >
+            Too many searches — retrying in {retrySeconds}s…
+          </div>
+        )}
+
         {isSearching && (
           <div className="skeleton-list">
             {[0, 1, 2, 3, 4].map((index) => (
@@ -237,8 +301,39 @@ export function SearchResultsPage() {
 
         {response && !isSearching && (
           <>
+            {response.results.length > 0 && (
+              <div className="results-toolbar">
+                <label className="results-toolbar__sort">
+                  <span>Sort</span>
+                  <select
+                    value={sortBy}
+                    aria-label="Sort results"
+                    onChange={(event) =>
+                      setSortBy(
+                        event.target.value as "best" | "rating" | "distance"
+                      )
+                    }
+                  >
+                    <option value="best">Best match</option>
+                    <option value="rating">Rating</option>
+                    <option value="distance">Distance</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className={`toolbar-toggle ${
+                    openNowOnly ? "toolbar-toggle--on" : ""
+                  }`}
+                  aria-pressed={openNowOnly}
+                  onClick={() => setOpenNowOnly((on) => !on)}
+                >
+                  Open now
+                </button>
+              </div>
+            )}
+
             <div className="result-list">
-              {response.results.slice(0, visibleCount).map((result, index) => (
+              {processedResults.slice(0, visibleCount).map((result, index) => (
                 <ResultCard
                   key={result.place_id || result.name}
                   result={result}
@@ -248,27 +343,47 @@ export function SearchResultsPage() {
               ))}
             </div>
 
-            {response.results.length > visibleCount && (
+            {processedResults.length > visibleCount && (
               <button
                 type="button"
                 className="load-more"
-                onClick={() => setVisibleCount(response.results.length)}
+                onClick={() => setVisibleCount(processedResults.length)}
               >
                 Load more
                 <span className="load-more__count">
-                  {response.results.length - visibleCount} more already ranked
+                  {processedResults.length - visibleCount} more already ranked
                 </span>
               </button>
             )}
 
-            {response.results.length === 0 && (
-              <div
-                className="alert"
-                role="status"
-                style={{ marginTop: "1.5rem" }}
-              >
-                Nothing came back for that search. Try a wider radius or a
-                broader term.
+            {processedResults.length === 0 && (
+              <div className="empty-state" role="status">
+                <span className="empty-state__icon" aria-hidden="true">
+                  🍽️
+                </span>
+                <p className="empty-state__title">
+                  {openNowOnly && response.results.length > 0
+                    ? "Nothing's open right now"
+                    : "Nothing came back for that search"}
+                </p>
+                <p className="empty-state__body">
+                  {openNowOnly && response.results.length > 0
+                    ? "Turn off “Open now”, or widen your search."
+                    : "Try a wider radius or a broader term."}
+                </p>
+                {openNowOnly && response.results.length > 0 ? (
+                  <button
+                    type="button"
+                    className="empty-state__cta"
+                    onClick={() => setOpenNowOnly(false)}
+                  >
+                    Show all places
+                  </button>
+                ) : (
+                  <Link to="/" className="empty-state__cta">
+                    Edit party &amp; search
+                  </Link>
+                )}
               </div>
             )}
 

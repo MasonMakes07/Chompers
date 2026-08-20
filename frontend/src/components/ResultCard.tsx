@@ -34,6 +34,45 @@ function scoreTone(percent: number): string {
   return "weak";
 }
 
+// Matches the backend's "good" status threshold (translator.py), so a chip
+// only claims a restriction the whole group is comfortably served on.
+const GOOD_CONFIDENCE = 0.75;
+
+interface DietHighlight {
+  label: string;
+  verified: boolean;
+}
+
+// Aggregates the group's confidently-met restrictions into positive chips. A
+// restriction qualifies only when its least-served guest still clears the good
+// bar, and is marked verified only when every such guest's evidence is.
+function dietHighlights(guestFits: GuestFit[]): DietHighlight[] {
+  const byRestriction = new Map<
+    string,
+    { label: string; minConfidence: number; verified: boolean }
+  >();
+
+  for (const guestFit of guestFits) {
+    for (const fit of guestFit.restriction_fits) {
+      const existing = byRestriction.get(fit.restriction);
+      if (existing === undefined) {
+        byRestriction.set(fit.restriction, {
+          label: fit.label,
+          minConfidence: fit.confidence,
+          verified: fit.verified,
+        });
+      } else {
+        existing.minConfidence = Math.min(existing.minConfidence, fit.confidence);
+        existing.verified = existing.verified && fit.verified;
+      }
+    }
+  }
+
+  return [...byRestriction.values()]
+    .filter((entry) => entry.minConfidence >= GOOD_CONFIDENCE)
+    .map((entry) => ({ label: entry.label, verified: entry.verified }));
+}
+
 // Summarizes one guest's limiting restriction for the compact badge.
 function badgeText(fit: GuestFit): string {
   const limiting = fit.restriction_fits.reduce<
@@ -56,6 +95,7 @@ export function ResultCard({
   const groupFitPercent = Math.round(result.group_fit * 100);
   const price = formatPrice(result.price_level);
   const subParts = [formatCuisine(result.cuisine), price].filter(Boolean);
+  const highlights = showGroupFit ? dietHighlights(result.guest_fits) : [];
 
   return (
     <article className="result-row">
@@ -104,6 +144,27 @@ export function ResultCard({
           </div>
         )}
       </div>
+
+      {highlights.length > 0 && (
+        <ul className="diet-highlights">
+          {highlights.map((highlight) => (
+            <li
+              key={highlight.label}
+              className={`diet-chip ${
+                highlight.verified ? "diet-chip--verified" : ""
+              }`}
+              title={
+                highlight.verified
+                  ? "Confirmed by the listing"
+                  : "Likely, based on cuisine"
+              }
+            >
+              {highlight.label}
+              {highlight.verified ? " ✓" : ""}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {showGroupFit && result.guest_fits.length > 0 && (
         <ul className="badges">

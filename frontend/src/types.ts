@@ -13,16 +13,47 @@ export const RESTRICTIONS = [
 
 export type RestrictionId = (typeof RESTRICTIONS)[number]["id"];
 
+// Each id is lowercase so the backend scorer can substring-match it against a
+// Google place type (e.g. "italian" matches "italian_restaurant").
+export const CUISINES = [
+  { id: "italian", label: "Italian" },
+  { id: "mexican", label: "Mexican" },
+  { id: "chinese", label: "Chinese" },
+  { id: "japanese", label: "Japanese" },
+  { id: "thai", label: "Thai" },
+  { id: "indian", label: "Indian" },
+  { id: "korean", label: "Korean" },
+  { id: "vietnamese", label: "Vietnamese" },
+  { id: "mediterranean", label: "Mediterranean" },
+  { id: "greek", label: "Greek" },
+  { id: "american", label: "American" },
+  { id: "seafood", label: "Seafood" },
+  { id: "pizza", label: "Pizza" },
+  { id: "barbecue", label: "Barbecue" },
+] as const;
+
+export type CuisineId = (typeof CUISINES)[number]["id"];
+
+// The backend rejects a guest with more than this many terms in either list.
+export const MAX_CUISINE_TERMS = 8;
+
 export interface GuestDraft {
   id: string;
   name: string;
   restrictions: RestrictionId[];
+  likedCuisines: CuisineId[];
+  dislikedCuisines: CuisineId[];
 }
 
 export interface SearchRequest {
   query?: string;
   guest_count: number;
-  guests: { name: string; restrictions: RestrictionId[] }[];
+  guests: {
+    name: string;
+    restrictions: RestrictionId[];
+    liked_cuisines: string[];
+    disliked_cuisines: string[];
+  }[];
   latitude?: number;
   longitude?: number;
   location_query?: string;

@@ -79,7 +79,13 @@ export function PartyForm(props: PartyFormProps) {
     if (guests.length >= MAX_GUESTS) return;
     const nextGuests = [
       ...guests,
-      { id: crypto.randomUUID(), name: "", restrictions: [] },
+      {
+        id: crypto.randomUUID(),
+        name: "",
+        restrictions: [],
+        likedCuisines: [],
+        dislikedCuisines: [],
+      },
     ];
     onGuestsChange(nextGuests);
     if (nextGuests.length > guestCount) {

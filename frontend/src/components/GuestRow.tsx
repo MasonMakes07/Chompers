@@ -1,7 +1,14 @@
 // One guest: avatar, name, a summary of their restrictions, and the chips.
 
 import { useState } from "react";
-import { RESTRICTIONS, type GuestDraft, type RestrictionId } from "../types";
+import {
+  CUISINES,
+  MAX_CUISINE_TERMS,
+  RESTRICTIONS,
+  type CuisineId,
+  type GuestDraft,
+  type RestrictionId,
+} from "../types";
 
 interface GuestRowProps {
   guest: GuestDraft;
@@ -34,6 +41,30 @@ export function GuestRow({ guest, index, onChange, onRemove }: GuestRowProps) {
         ? guest.restrictions.filter((item) => item !== restrictionId)
         : [...guest.restrictions, restrictionId],
     });
+  };
+
+  // Cycles one cuisine through neutral -> liked -> avoided -> neutral. Each
+  // list is capped at the backend's limit so a submit can never be rejected.
+  const cycleCuisine = (cuisineId: CuisineId) => {
+    const liked = guest.likedCuisines ?? [];
+    const avoided = guest.dislikedCuisines ?? [];
+
+    if (liked.includes(cuisineId)) {
+      if (avoided.length >= MAX_CUISINE_TERMS) return;
+      onChange({
+        ...guest,
+        likedCuisines: liked.filter((item) => item !== cuisineId),
+        dislikedCuisines: [...avoided, cuisineId],
+      });
+    } else if (avoided.includes(cuisineId)) {
+      onChange({
+        ...guest,
+        dislikedCuisines: avoided.filter((item) => item !== cuisineId),
+      });
+    } else {
+      if (liked.length >= MAX_CUISINE_TERMS) return;
+      onChange({ ...guest, likedCuisines: [...liked, cuisineId] });
+    }
   };
 
   return (
@@ -97,24 +128,58 @@ export function GuestRow({ guest, index, onChange, onRemove }: GuestRowProps) {
       </div>
 
       {isOpen && (
-        <div className="chip-group">
-          {RESTRICTIONS.map((restriction) => {
-            const isActive = guest.restrictions.includes(restriction.id);
-            return (
-              <button
-                key={restriction.id}
-                type="button"
-                aria-pressed={isActive}
-                className={`chip chip--${restriction.kind} ${
-                  isActive ? "chip--active" : ""
-                }`}
-                onClick={() => toggleRestriction(restriction.id)}
-              >
-                {restriction.label}
-              </button>
-            );
-          })}
-        </div>
+        <>
+          <div className="chip-group">
+            {RESTRICTIONS.map((restriction) => {
+              const isActive = guest.restrictions.includes(restriction.id);
+              return (
+                <button
+                  key={restriction.id}
+                  type="button"
+                  aria-pressed={isActive}
+                  className={`chip chip--${restriction.kind} ${
+                    isActive ? "chip--active" : ""
+                  }`}
+                  onClick={() => toggleRestriction(restriction.id)}
+                >
+                  {restriction.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <p className="chip-group__hint">
+            Cuisines — tap to like, tap again to avoid
+          </p>
+          <div className="chip-group chip-group--tight">
+            {CUISINES.map((cuisine) => {
+              const isLiked = (guest.likedCuisines ?? []).includes(cuisine.id);
+              const isAvoided = (guest.dislikedCuisines ?? []).includes(
+                cuisine.id
+              );
+              const state = isLiked ? "like" : isAvoided ? "avoid" : "";
+              return (
+                <button
+                  key={cuisine.id}
+                  type="button"
+                  aria-pressed={isLiked || isAvoided}
+                  aria-label={
+                    isLiked
+                      ? `Likes ${cuisine.label}`
+                      : isAvoided
+                        ? `Avoids ${cuisine.label}`
+                        : cuisine.label
+                  }
+                  className={`chip chip--cuisine ${state ? `chip--${state}` : ""}`}
+                  onClick={() => cycleCuisine(cuisine.id)}
+                >
+                  {isLiked ? "♥ " : isAvoided ? "✕ " : ""}
+                  {cuisine.label}
+                </button>
+              );
+            })}
+          </div>
+        </>
       )}
     </div>
   );

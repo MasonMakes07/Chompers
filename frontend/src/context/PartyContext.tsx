@@ -56,7 +56,13 @@ function writeStored(key: string, value: unknown): void {
 
 export function PartyProvider({ children }: { children: ReactNode }) {
   const [guests, setGuestsState] = useState<GuestDraft[]>(() =>
-    readStored<GuestDraft[]>(GUESTS_STORAGE_KEY, [])
+    // Backfill cuisine fields so guests stored before this feature existed
+    // (and any hand-edited storage) still satisfy the current shape.
+    readStored<GuestDraft[]>(GUESTS_STORAGE_KEY, []).map((guest) => ({
+      ...guest,
+      likedCuisines: guest.likedCuisines ?? [],
+      dislikedCuisines: guest.dislikedCuisines ?? [],
+    }))
   );
   const [coordinates, setCoordinatesState] = useState<Coordinates | null>(() =>
     readStored<Coordinates | null>(COORDS_STORAGE_KEY, null)
