@@ -49,8 +49,14 @@ in, invite them to the project.
 
 - Open the deployment URL (logged into Vercel) → the app loads.
 - `https://<your-app>.vercel.app/api/health` → `{"provider": "google", ...}`.
-  - If this 404s, the `/api` routing needs a tweak — tell me and I'll adjust
-    `vercel.json` / add a catch-all function.
+  - If this returns `{"detail":"Not Found"}`, the request reached FastAPI but the
+    path was wrong. The backend lives at `api/[...path].py` — a **catch-all**, so
+    Vercel preserves the real path. Do **not** rename it to `index.py` and do
+    **not** add an `/api/(.*)` rewrite: rewrite destinations are fixed strings that
+    discard the path, so every route would 404.
+  - If the **frontend** 404s, check that no `requirements.txt` has reappeared at the
+    repo root — that makes Vercel treat the project as a backend framework and route
+    static requests into Python. Python deps belong in `api/requirements.txt`.
 - Run a search; try a misspelled city like `San Fransisco CA` → resolves to
   California (confirms both Google APIs work).
 - Open the URL in a **private/incognito window** (logged out) → you should hit the

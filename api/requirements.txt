@@ -1,4 +1,8 @@
-# Runtime dependencies (installed by Vercel for the /api function).
+# Runtime dependencies for the Vercel serverless function.
+#
+# Deliberately lives in api/ rather than the repo root: a root-level
+# requirements.txt makes Vercel classify the project as a "backend framework
+# project" and route static requests into Python, which 404s the frontend.
 # Pinned for reproducible builds. Dev/test extras live in requirements-dev.txt.
 fastapi==0.141.1
 httpx==0.28.1
