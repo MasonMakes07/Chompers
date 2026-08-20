@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Logo } from "../components/Logo";
 import { ResultCard } from "../components/ResultCard";
 import { SearchBar } from "../components/SearchBar";
 import { RateLimitError, searchRestaurants } from "../api/client";
@@ -210,6 +211,7 @@ export function SearchResultsPage() {
     <>
       <header className="topbar">
         <Link to="/" className="brand">
+          <Logo className="brand__mark" />
           Chompers
         </Link>
         <div className="topbar__search">

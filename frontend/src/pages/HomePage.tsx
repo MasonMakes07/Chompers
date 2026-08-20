@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Logo } from "../components/Logo";
 import { PartyForm } from "../components/PartyForm";
 import { SearchBar } from "../components/SearchBar";
 import { useParty } from "../context/PartyContext";
@@ -66,45 +67,20 @@ export function HomePage() {
   return (
     <>
       <header className="topbar">
-        <span className="brand">Chompers</span>
+        <span className="brand">
+          <Logo className="brand__mark" />
+          Chompers
+        </span>
         <div className="topbar__search">
           <SearchBar onSearch={runQuickSearch} />
         </div>
       </header>
 
       <div className="hero">
-        <svg
+        <Logo
           className="hero__art"
-          viewBox="0 0 200 140"
-          role="img"
-          aria-label="A group sharing a meal everyone can eat"
-        >
-          {/* Plate */}
-          <ellipse
-            cx="100"
-            cy="98"
-            rx="62"
-            ry="22"
-            fill="#eef2ec"
-            stroke="#3f5a45"
-            strokeWidth="3"
-          />
-          <ellipse cx="100" cy="95" rx="43" ry="14" fill="#dbe6dd" />
-          {/* Three heads, one group */}
-          <circle cx="70" cy="48" r="16" fill="#d9b354" />
-          <circle cx="100" cy="40" r="18" fill="#3f5a45" />
-          <circle cx="130" cy="48" r="16" fill="#b58575" />
-          {/* "Everyone's good" check */}
-          <circle cx="152" cy="30" r="14" fill="#3f5a45" />
-          <path
-            d="M145 30l5 6 9-11"
-            stroke="#fff"
-            strokeWidth="3"
-            fill="none"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+          label="A group sharing a meal everyone can eat"
+        />
         <h1 className="hero__title">Eat together, no compromises</h1>
         <p className="hero__subtitle">
           Find a spot where <em>everyone</em> can actually eat — or use quick

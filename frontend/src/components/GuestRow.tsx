@@ -82,6 +82,8 @@ export function GuestRow({ guest, index, onChange, onRemove }: GuestRowProps) {
             value={guest.name}
             placeholder={`Person ${index + 1}`}
             aria-label={`Name of person ${index + 1}`}
+            autoComplete="off"
+            autoCapitalize="words"
             onChange={(event) => onChange({ ...guest, name: event.target.value })}
           />
           <p

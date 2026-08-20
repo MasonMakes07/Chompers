@@ -59,6 +59,12 @@ select {
   color: inherit;
 }
 
+/* A soft branded tap flash instead of the default grey block on touch. */
+a,
+button {
+  -webkit-tap-highlight-color: rgba(63, 90, 69, 0.12);
+}
+
 .app {
   max-width: 1180px;
   margin: 0 auto;
@@ -75,12 +81,22 @@ select {
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
   font-size: 1.4rem;
   font-weight: 700;
   color: var(--forest);
   text-decoration: none;
   letter-spacing: -0.02em;
   white-space: nowrap;
+}
+
+.brand__mark {
+  display: block;
+  width: 3rem;
+  height: auto;
+  flex-shrink: 0;
 }
 
 .topbar__search {
@@ -908,6 +924,7 @@ select {
   font-weight: 600;
   margin: 0;
   letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
 }
 
 .result-row__sub {
@@ -1118,6 +1135,12 @@ select {
     padding: 1rem 1rem 3rem;
   }
 
+  /* 16px on form controls stops iOS Safari from zooming the page on focus. */
+  input,
+  select {
+    font-size: 16px;
+  }
+
   .topbar {
     flex-wrap: wrap;
     gap: 0.85rem;
@@ -1141,11 +1164,73 @@ select {
     flex: 1;
   }
 
+  .searchbar__locate {
+    min-width: 40px;
+    min-height: 40px;
+    justify-content: center;
+  }
+
+  /* Reclaim width: lighter card padding and a smaller results heading. */
+  .card,
+  .results-card {
+    padding: 1.1rem;
+  }
+
+  .results-title {
+    font-size: 1.6rem;
+  }
+
   .filters-row {
     grid-template-columns: 1fr;
   }
 
+  /* Stack the locate button and the city/ZIP field into full-width rows. */
+  .location-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .location-row__or {
+    text-align: center;
+  }
+
+  /* Comfortable tap targets. */
+  .chip {
+    padding: 0.45rem 0.85rem;
+  }
+
+  .results-toolbar__sort select,
+  .toolbar-toggle {
+    padding: 0.5rem 0.95rem;
+  }
+
+  .icon-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .guest-card__toggle {
+    padding: 0.5rem;
+  }
+
   .result-row__thumb {
     display: none;
+  }
+}
+
+/* Smallest phones: keep the rank + name + score row from crowding. */
+@media (max-width: 380px) {
+  .result-row__top {
+    gap: 0.65rem;
+  }
+
+  .score-label {
+    display: none;
+  }
+
+  .score-badge {
+    min-width: 52px;
+    font-size: 1.25rem;
+    padding: 0.5rem;
   }
 }

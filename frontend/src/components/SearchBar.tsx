@@ -97,6 +97,9 @@ export function SearchBar({
           placeholder={locationPlaceholder}
           aria-label="Location"
           title={locationLabel ?? undefined}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="words"
           value={locationQuery}
           onChange={(event) => {
             setLocationQuery(event.target.value);
