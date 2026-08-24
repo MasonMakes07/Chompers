@@ -3,6 +3,11 @@
 The central idea is that a restaurant where four people are delighted and one
 person cannot eat is a BAD result. A plain average hides that person, so the
 group score is dominated by the worst-served guest.
+
+The same logic applies to taste. Four people getting the cuisine they asked
+for while the fifth gets nothing they wanted is not a perfect group match, so
+unmet tastes scale the group score down in proportion to how many guests go
+unserved.
 """
 
 import math
@@ -29,6 +34,12 @@ WEIGHT_QUERY_RELEVANCE = 0.25
 # poorly served guest cannot be averaged away by four happy ones.
 MIN_GUEST_WEIGHT = 0.60
 MEAN_GUEST_WEIGHT = 1.0 - MIN_GUEST_WEIGHT
+
+# The most that unmet cuisine tastes can pull the group score down. Dietary
+# fit is multiplied by TASTE_FLOOR when nobody's stated taste is served, and
+# left untouched when everybody's is, so a party where each person wants
+# something different can never read as a perfect match for the group.
+TASTE_FLOOR = 0.60
 
 # Any guest below this confidence disqualifies the restaurant outright.
 HARD_FLOOR = 0.25
@@ -245,19 +256,39 @@ def distance_score(distance_meters: float, radius_meters: int) -> float:
     return math.exp(-distance_meters / (radius_meters * 0.6))
 
 
-# Rewards restaurants matching party cuisine likes and penalizes dislikes.
-def cuisine_preference_score(
-    restaurant: Restaurant, liked: set[str], disliked: set[str]
-) -> float:
-    if not liked and not disliked:
-        return 0.5
-    haystack = f"{' '.join(restaurant.types)} {restaurant.searchable_name}"
-    score = 0.5
-    if any(term in haystack for term in liked):
-        score += 0.5
-    if any(term in haystack for term in disliked):
-        score -= 0.5
-    return max(0.0, min(1.0, score))
+# Builds the text one guest's cuisine terms are matched against.
+def _cuisine_haystack(restaurant: Restaurant) -> str:
+    return f"{' '.join(restaurant.types)} {restaurant.searchable_name}"
+
+
+# Reports whether one guest's own tastes are served here, on a 0-1 scale.
+def guest_taste_satisfaction(restaurant: Restaurant, guest: Guest) -> float:
+    if not guest.liked_cuisines and not guest.disliked_cuisines:
+        # No stated taste, so this guest is content anywhere.
+        return 1.0
+
+    haystack = _cuisine_haystack(restaurant)
+    # A dislike outranks a like: serving something they will not eat is worse
+    # than also happening to serve something they would.
+    if any(term in haystack for term in guest.disliked_cuisines):
+        return 0.0
+    if any(term in haystack for term in guest.liked_cuisines):
+        return 1.0
+    # They asked for something and this is not it.
+    return 0.0
+
+
+# Measures what share of the party's stated tastes this restaurant serves.
+def taste_coverage(restaurant: Restaurant, guests: list[Guest]) -> float:
+    if not guests:
+        return 1.0
+    satisfactions = [
+        guest_taste_satisfaction(restaurant, guest) for guest in guests
+    ]
+    # A mean, so 1.0 is reachable only when every guest is served. Flattening
+    # tastes into one party-wide set used to give full credit for satisfying
+    # a single person, which is exactly what this replaces.
+    return sum(satisfactions) / len(satisfactions)
 
 
 # Scores how directly a restaurant answers what the user actually searched.
@@ -313,7 +344,12 @@ def price_fit_score(price_level: int | None, max_price_level: int | None) -> flo
 # Scores a single restaurant against the whole party and explains the result.
 def score_restaurant(restaurant: Restaurant, party: Party) -> ScoredRestaurant:
     guest_fits = [guest_confidence(restaurant, guest) for guest in party.guests]
-    group_fit = group_fit_score(guest_fits)
+    dietary_fit = group_fit_score(guest_fits)
+    coverage = taste_coverage(restaurant, party.guests)
+    # Taste can only pull the group score down, never lift it, and only as far
+    # as TASTE_FLOOR. A party that stated no tastes has coverage 1.0, so its
+    # score is unchanged.
+    group_fit = dietary_fit * (TASTE_FLOOR + (1.0 - TASTE_FLOOR) * coverage)
     distance = restaurant.distance_meters_from(party.latitude, party.longitude)
 
     # Only components with real data contribute, and the total is renormalized
@@ -324,13 +360,12 @@ def score_restaurant(restaurant: Restaurant, party: Party) -> ScoredRestaurant:
     components: list[tuple[float, float]] = [
         (WEIGHT_GROUP_FIT, group_fit),
         (WEIGHT_DISTANCE, distance_score(distance, party.radius_meters)),
-        (
-            WEIGHT_CUISINE,
-            cuisine_preference_score(
-                restaurant, party.liked_cuisines(), party.disliked_cuisines()
-            ),
-        ),
     ]
+    # Only a party that actually stated a taste has a preference to score, so
+    # otherwise the component is dropped and its weight renormalized away
+    # rather than scoring every restaurant with the same dead constant.
+    if party.liked_cuisines() or party.disliked_cuisines():
+        components.append((WEIGHT_CUISINE, coverage))
     if restaurant.rating is not None:
         components.append(
             (WEIGHT_RATING, rating_score(restaurant.rating, restaurant.rating_count))

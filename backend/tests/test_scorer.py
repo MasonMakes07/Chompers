@@ -375,3 +375,131 @@ def test_scores_stay_normalized():
     for candidate in ranked:
         assert 0.0 <= candidate.score <= 1.0
         assert 0.0 <= candidate.group_fit <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# Cuisine tastes: everyone's preference has to count, not just the first match
+# ---------------------------------------------------------------------------
+
+
+# A guest who stated nothing is content anywhere, so tastes stay opt-in.
+def test_a_guest_with_no_stated_taste_is_always_satisfied():
+    thai = make_restaurant("Bangkok House", "thai_restaurant")
+
+    assert scorer.guest_taste_satisfaction(thai, Guest("Mason")) == 1.0
+
+
+# A stated like that the restaurant serves is fully satisfied.
+def test_a_served_like_is_satisfied():
+    thai = make_restaurant("Bangkok House", "thai_restaurant")
+    guest = Guest("Mason", liked_cuisines={"thai"})
+
+    assert scorer.guest_taste_satisfaction(thai, guest) == 1.0
+
+
+# Asking for something the restaurant does not serve is not satisfied.
+def test_an_unserved_like_is_not_satisfied():
+    thai = make_restaurant("Bangkok House", "thai_restaurant")
+    guest = Guest("Maya", liked_cuisines={"sushi"})
+
+    assert scorer.guest_taste_satisfaction(thai, guest) == 0.0
+
+
+# A dislike outranks a like when the restaurant happens to match both.
+def test_a_dislike_outranks_a_like():
+    thai = make_restaurant(
+        "Bangkok House", "thai_restaurant", types=["thai_restaurant", "seafood"]
+    )
+    guest = Guest("Sam", liked_cuisines={"thai"}, disliked_cuisines={"seafood"})
+
+    assert scorer.guest_taste_satisfaction(thai, guest) == 0.0
+
+
+# Coverage must be the share of guests served, not "did anyone match".
+def test_coverage_is_the_share_of_guests_served():
+    thai = make_restaurant("Bangkok House", "thai_restaurant")
+    guests = [
+        Guest("Mason", liked_cuisines={"thai"}),
+        Guest("Maya", liked_cuisines={"sushi"}),
+        Guest("Sam", liked_cuisines={"pizza"}),
+    ]
+
+    assert scorer.taste_coverage(thai, guests) == pytest.approx(1 / 3)
+
+
+# The headline bug: an unrestricted party who all want different things must
+# not read as a perfect group match just because nobody has a restriction.
+def test_differing_tastes_cannot_score_a_perfect_group_fit():
+    thai = make_restaurant("Bangkok House", "thai_restaurant")
+    party = make_party(
+        [
+            Guest("Mason", liked_cuisines={"thai"}),
+            Guest("Maya", liked_cuisines={"sushi"}),
+            Guest("Sam", liked_cuisines={"pizza"}),
+        ]
+    )
+
+    scored = scorer.score_restaurant(thai, party)
+
+    assert scored.group_fit < 1.0
+    # One of three served: 1.0 * (0.6 + 0.4 * 1/3).
+    assert scored.group_fit == pytest.approx(0.7333, abs=0.001)
+
+
+# Serving every stated taste must still reach a perfect group fit.
+def test_serving_every_taste_still_scores_a_perfect_group_fit():
+    fusion = make_restaurant(
+        "Everything Bar",
+        "thai_restaurant",
+        types=["thai_restaurant", "sushi_restaurant", "pizza_restaurant"],
+    )
+    party = make_party(
+        [
+            Guest("Mason", liked_cuisines={"thai"}),
+            Guest("Maya", liked_cuisines={"sushi"}),
+            Guest("Sam", liked_cuisines={"pizza"}),
+        ]
+    )
+
+    scored = scorer.score_restaurant(fusion, party)
+
+    assert scored.group_fit == pytest.approx(1.0)
+
+
+# A party that stated no tastes at all must be scored exactly as before.
+def test_a_party_with_no_stated_tastes_is_unaffected():
+    thai = make_restaurant("Bangkok House", "thai_restaurant")
+    party = make_party([Guest("Mason"), Guest("Maya")])
+
+    scored = scorer.score_restaurant(thai, party)
+
+    assert scored.group_fit == pytest.approx(1.0)
+
+
+# The restaurant serving more of the party's tastes must actually rank higher.
+def test_broader_taste_coverage_wins_the_ranking():
+    narrow = make_restaurant("One Note", "thai_restaurant")
+    broad = make_restaurant(
+        "Two Notes", "thai_restaurant", types=["thai_restaurant", "sushi_restaurant"]
+    )
+    party = make_party(
+        [
+            Guest("Mason", liked_cuisines={"thai"}),
+            Guest("Maya", liked_cuisines={"sushi"}),
+        ]
+    )
+
+    ranked, _ = scorer.rank_restaurants([narrow, broad], party)
+
+    assert ranked[0].restaurant.name == "Two Notes"
+
+
+# Tastes are soft: an unserved preference must never disqualify a restaurant.
+def test_an_unserved_taste_never_disqualifies():
+    thai = make_restaurant("Bangkok House", "thai_restaurant")
+    party = make_party([Guest("Maya", liked_cuisines={"sushi"})])
+
+    ranked, excluded = scorer.rank_restaurants([thai], party)
+
+    assert excluded == 0
+    assert len(ranked) == 1
