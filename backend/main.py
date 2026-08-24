@@ -19,7 +19,7 @@ from .middleware import (
     SecurityHeadersMiddleware,
 )
 from .schemas import SearchRequest, SearchResponse
-from .services.geocoder import Geocoder, GeocodingError
+from .services.geocoder import Geocoder, GeocoderBusyError, GeocodingError
 from .services.places_client import PlacesError, create_places_client
 from .services.query_parser import parse_query
 
@@ -93,6 +93,14 @@ async def reverse_geocode(latitude: float, longitude: float) -> dict[str, object
         )
     try:
         return {"label": await geocoder.reverse(latitude, longitude)}
+    except GeocoderBusyError as error:
+        # Shedding load, not a bad gateway. 503 with Retry-After tells the
+        # client to come back rather than treating this as a dead end.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+            headers={"Retry-After": "5"},
+        ) from error
     except GeocodingError as error:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)
@@ -111,6 +119,13 @@ async def _name_location(latitude: float, longitude: float) -> str:
 async def _geocode_or_reject(location_query: str) -> tuple[float, float, str]:
     try:
         return await geocoder.resolve(location_query)
+    except GeocoderBusyError as error:
+        # The query was fine; we simply could not get to it in time.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(error),
+            headers={"Retry-After": "5"},
+        ) from error
     except GeocodingError as error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)

@@ -15,6 +15,7 @@ import time
 import httpx
 
 from ..config import get_settings
+from .bounded_cache import BoundedCache
 
 GEOCODE_URL = "https://nominatim.openstreetmap.org/search"
 REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
@@ -34,6 +35,19 @@ _REQUEST_LOCK = asyncio.Lock()
 MIN_SECONDS_BETWEEN_REQUESTS = 1.0
 _last_request_at = 0.0
 
+# How long a caller will queue for the paced lock before giving up. The lock
+# serializes every lookup to one per second, so under load the queue is the
+# bottleneck, not the network. Without a ceiling, arrivals outpacing one per
+# second grow the waiter list without bound: latency climbs until healthy
+# searches time out. Failing fast sheds that load instead of absorbing it.
+MAX_LOCK_WAIT_SECONDS = 8.0
+
+# Ceilings for the two permanent caches. A ZIP code's coordinates never change,
+# so entries stay valid forever - but "forever" must still be bounded, since
+# the key space is attacker-controlled (any typed string, any coordinate).
+MAX_FORWARD_CACHE_ENTRIES = 2048
+MAX_REVERSE_CACHE_ENTRIES = 2048
+
 
 # ---------------------------------------------------------------------------
 
@@ -42,25 +56,38 @@ class GeocodingError(RuntimeError):
     """Raised when an address cannot be resolved to coordinates."""
 
 
+class GeocoderBusyError(GeocodingError):
+    """Raised when the paced request queue is too long to join.
+
+    Separate from GeocodingError so the API can answer 503 (come back later)
+    rather than 400 (your input was bad) - the query was never the problem.
+    """
+
+
 # ---------------------------------------------------------------------------
 
 
 class Geocoder:
     """Resolves free-text locations into latitude/longitude pairs."""
 
-    # Prepares the geocoder with settings and small permanent caches.
+    # Prepares the geocoder with settings and small bounded permanent caches.
     def __init__(self) -> None:
         self._settings = get_settings()
-        self._cache: dict[str, tuple[float, float, str]] = {}
-        self._reverse_cache: dict[tuple[float, float], str] = {}
+        self._cache: BoundedCache[str, tuple[float, float, str]] = BoundedCache(
+            MAX_FORWARD_CACHE_ENTRIES
+        )
+        self._reverse_cache: BoundedCache[tuple[float, float], str] = BoundedCache(
+            MAX_REVERSE_CACHE_ENTRIES
+        )
 
     # Resolves a place name or ZIP to (latitude, longitude, display name).
     async def resolve(self, query: str) -> tuple[float, float, str]:
         normalized_query = query.strip().lower()
         if not normalized_query:
             raise GeocodingError("Enter a city or ZIP code.")
-        if normalized_query in self._cache:
-            return self._cache[normalized_query]
+        cached = self._cache.get(normalized_query)
+        if cached is not None:
+            return cached
 
         body = await self._request(query.strip())
         if not body:
@@ -68,7 +95,7 @@ class Geocoder:
             # misspellings) before giving up. Same country restriction applies.
             fallback = await self._google_fallback(query.strip())
             if fallback is not None:
-                self._cache[normalized_query] = fallback
+                self._cache.put(normalized_query, fallback)
                 return fallback
             raise GeocodingError(
                 f"Could not find '{query}'. Try a ZIP code or 'City, State'."
@@ -84,15 +111,16 @@ class Geocoder:
         except (KeyError, TypeError, ValueError) as error:
             raise GeocodingError("The geocoder returned an unusable result.") from error
 
-        self._cache[normalized_query] = resolved
+        self._cache.put(normalized_query, resolved)
         return resolved
 
     # Names the place at a coordinate, e.g. "La Jolla, San Diego, CA".
     async def reverse(self, latitude: float, longitude: float) -> str:
         # Rounding to ~100m means small GPS jitter reuses one cache entry.
         cache_key = (round(latitude, 3), round(longitude, 3))
-        if cache_key in self._reverse_cache:
-            return self._reverse_cache[cache_key]
+        cached = self._reverse_cache.get(cache_key)
+        if cached is not None:
+            return cached
 
         params = {
             "lat": f"{latitude:.6f}",
@@ -108,7 +136,7 @@ class Geocoder:
         label = self._label_from_address(
             body["address"], body.get("display_name", "")
         )
-        self._reverse_cache[cache_key] = label
+        self._reverse_cache.put(cache_key, label)
         return label
 
     # Builds a short, readable place label from Nominatim's address parts.
@@ -205,7 +233,18 @@ class Geocoder:
 
         headers = {"User-Agent": self._settings.user_agent}
 
-        async with _REQUEST_LOCK:
+        # Join the paced queue, but only for so long. Waiting forever is what
+        # turns a slow upstream into an unbounded backlog of held requests.
+        try:
+            await asyncio.wait_for(
+                _REQUEST_LOCK.acquire(), timeout=MAX_LOCK_WAIT_SECONDS
+            )
+        except asyncio.TimeoutError as error:
+            raise GeocoderBusyError(
+                "Too many location lookups are queued. Try again in a moment."
+            ) from error
+
+        try:
             elapsed = time.monotonic() - _last_request_at
             if elapsed < MIN_SECONDS_BETWEEN_REQUESTS:
                 await asyncio.sleep(MIN_SECONDS_BETWEEN_REQUESTS - elapsed)
@@ -218,11 +257,15 @@ class Geocoder:
                         url, params=params, headers=headers
                     )
             except httpx.RequestError as error:
+                # The upstream message can carry internal connection detail,
+                # so it is deliberately not echoed to the caller.
                 raise GeocodingError(
-                    f"Could not reach the geocoder: {error}"
+                    "Could not reach the geocoder. Try again shortly."
                 ) from error
             finally:
                 _last_request_at = time.monotonic()
+        finally:
+            _REQUEST_LOCK.release()
 
         if response.status_code == 429:
             raise GeocodingError(
