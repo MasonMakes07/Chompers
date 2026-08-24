@@ -29,8 +29,8 @@ function formatCuisine(cuisine: string): string {
 
 // Picks the badge color band from the group-fit percentage.
 function scoreTone(percent: number): string {
-  if (percent >= 96) return "strong";
-  if (percent >= 86) return "good";
+  if (percent >= 85) return "strong";
+  if (percent >= 65) return "good";
   return "weak";
 }
 
