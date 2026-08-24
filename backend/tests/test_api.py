@@ -3,7 +3,10 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from backend import middleware
+from backend.config import get_settings
 from backend.main import app
+from backend.middleware import SECURITY_HEADERS, RateLimitMiddleware
 
 BASE_LAT, BASE_LNG = 32.8801, -117.2340
 
@@ -35,6 +38,60 @@ def test_security_headers_are_applied(client):
 
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["X-Frame-Options"] == "DENY"
+
+
+# Confirms every header in the set, not just the two spot-checked above.
+def _assert_security_headers(response) -> None:
+    for header_name, header_value in SECURITY_HEADERS.items():
+        assert response.headers.get(header_name) == header_value, (
+            f"{header_name} missing from a {response.status_code} response"
+        )
+
+
+# A throttled request is still a response the browser renders, so it needs the
+# same hardening. This regresses a real bug: while the header middleware sat
+# INSIDE the limiters, every 429 was short-circuited before it ran and went out
+# bare. Testing only /api/health hid that, since the happy path always runs.
+def test_security_headers_are_applied_to_a_429(client, monkeypatch):
+    middleware.reset_rate_limits()
+    monkeypatch.setattr(
+        RateLimitMiddleware, "_client_key", lambda self, request: "429-header-test"
+    )
+
+    # Exhaust the burst allowance, then keep going until one is refused.
+    throttled = None
+    for _ in range(200):
+        response = client.post(
+            "/api/search",
+            json={
+                "guest_count": 2,
+                "guests": [],
+                "latitude": BASE_LAT,
+                "longitude": BASE_LNG,
+                "radius_meters": 5000,
+            },
+        )
+        if response.status_code == 429:
+            throttled = response
+            break
+
+    assert throttled is not None, "the limiter never refused a request"
+    _assert_security_headers(throttled)
+    middleware.reset_rate_limits()
+
+
+# The same gap applied to oversized requests, which the size limiter refuses
+# before the route (and so before the header middleware) ever ran.
+def test_security_headers_are_applied_to_a_413(client):
+    oversized = get_settings().max_request_bytes + 1
+    response = client.post(
+        "/api/search",
+        headers={"Content-Type": "application/json", "Content-Length": str(oversized)},
+        content=b"{}",
+    )
+
+    assert response.status_code == 413
+    _assert_security_headers(response)
 
 
 # A malformed body must be rejected by validation, never reaching the provider.

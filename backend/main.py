@@ -40,9 +40,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(SecurityHeadersMiddleware)
+# Order matters, and reads backwards: add_middleware prepends, so the LAST
+# one added is the outermost. Effective order is therefore
+# CORS -> SecurityHeaders -> RequestSizeLimit -> RateLimit -> route.
+#
+# SecurityHeaders has to sit outside the two limiters. When it was innermost,
+# every response those limiters short-circuit - each 429 and each 413 - went
+# out with no security headers at all, because the route (and so the header
+# middleware) never ran.
 app.add_middleware(RateLimitMiddleware)
 app.add_middleware(RequestSizeLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
